@@ -1,0 +1,43 @@
+{
+  "name": "pantry-scoop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Snap your pantry, track what you have, and get recipes that fit your stock and kitchen — powered by your own ChatGPT plan via \"Sign in with ChatGPT\".",
+  "license": "MIT",
+  "keywords": [
+    "pantry",
+    "recipes",
+    "ice-cream",
+    "chatgpt",
+    "sign-in-with-chatgpt",
+    "self-hosted"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/main.ts",
+    "dev": "node --disable-warning=ExperimentalWarning --watch src/main.ts",
+    "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test",
+    "service:install": "systemctl --user link \"$PWD/deploy/pantry-scoop.service\" && systemctl --user daemon-reload && systemctl --user enable --now pantry-scoop.service",
+    "service:restart": "systemctl --user restart pantry-scoop.service",
+    "service:status": "systemctl --user status pantry-scoop.service --no-pager",
+    "service:logs": "journalctl --user -u pantry-scoop.service -f"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.1.2",
+    "@fastify/rate-limit": "^11.2.0",
+    "@fastify/static": "^10.1.5",
+    "fastify": "^5.12.5",
+    "jose": "^6.2.12",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "@types/qrcode": "^1.5.6",
+    "typescript": "^7.0.2"
+  }
+}

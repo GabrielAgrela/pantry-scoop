@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f6efe6" />
+    <title>Pantry Scoop</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧺</text></svg>" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/js/main.js"></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <h1>🧺 Pantry Scoop</h1>
+      <div id="account" class="account"></div>
+    </header>
+
+    <main>
+      <section id="view-login" hidden></section>
+      <section id="view-stock" class="view" data-view="stock" hidden></section>
+      <section id="view-recipes" class="view" data-view="recipes" hidden></section>
+      <section id="view-profile" class="view" data-view="profile" hidden></section>
+    </main>
+
+    <nav class="tabbar" aria-label="Sections" hidden>
+      <button type="button" data-tab="stock" aria-current="page"><span aria-hidden="true">🧺</span>Stock</button>
+      <button type="button" data-tab="recipes"><span aria-hidden="true">📖</span>Recipes</button>
+      <button type="button" data-tab="profile"><span aria-hidden="true">🍳</span>Kitchen</button>
+    </nav>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  </body>
+</html>

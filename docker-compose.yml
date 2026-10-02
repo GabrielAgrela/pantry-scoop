@@ -1,0 +1,33 @@
+services:
+  pantry-scoop:
+    build: .
+    image: pantry-scoop:latest
+    container_name: pantry-scoop
+    restart: unless-stopped
+    # Only reachable from this machine: nginx publishes it at https://<your domain>, and the
+    # ChatGPT sign-in callback (http://127.0.0.1:3210/auth/callback) works from this computer.
+    ports:
+      - "127.0.0.1:3210:3210"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3210"
+      DB_PATH: /app/data/pantry.db
+    volumes:
+      - ./data:/app/data
+    # Hardening: read-only image, no extra privileges, bounded resources and logs.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    pids_limit: 200
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

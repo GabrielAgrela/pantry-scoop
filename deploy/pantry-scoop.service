@@ -1,0 +1,21 @@
+# systemd *user* unit. Install with: npm run service:install
+# Runs at boot (requires `loginctl enable-linger $USER`) and restarts on any crash.
+[Unit]
+Description=Pantry Scoop (photo stock + ice-cream recipes)
+After=network-online.target
+Wants=network-online.target
+# Never give up restarting, however often it fails.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/pantry-scoop
+Environment=NODE_ENV=production
+# HOST/PORT/DB_PATH/CHATGPT_* come from .env (loaded by the app itself).
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning src/main.ts
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target
