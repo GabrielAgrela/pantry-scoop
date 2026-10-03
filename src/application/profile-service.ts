@@ -8,8 +8,10 @@ export class ProfileService {
     this.repository = repository;
   }
 
+  /** Profiles saved before a setting existed get its default. */
   get(): KitchenProfile {
-    return this.repository.load() ?? DEFAULT_PROFILE;
+    const stored = this.repository.load();
+    return stored ? { ...DEFAULT_PROFILE, ...stored } : DEFAULT_PROFILE;
   }
 
   update(input: unknown): KitchenProfile {

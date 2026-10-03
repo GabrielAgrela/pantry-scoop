@@ -169,6 +169,7 @@ export function upgradeIceCreamProfile(old: LegacyProfile): KitchenProfile {
   const others = DEFAULT_PROFILE.appliances.filter((a) => !/ice-cream machine|freezer/i.test(a.name));
   return {
     appliances: [machine, freezer, ...others],
+    dishTypes: DEFAULT_PROFILE.dishTypes,
     servings: DEFAULT_PROFILE.servings,
     units: old.units,
     language: old.language,

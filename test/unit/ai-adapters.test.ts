@@ -108,13 +108,14 @@ describe('parseDetection', () => {
 describe('AiRecipeGenerator', () => {
   it('puts the stock, machine and request into the prompt', async () => {
     const { model, requests } = fakeModel({ recipes: [sampleRecipe()] });
-    const request = { kind: 'ice-cream' as const, count: 2, servings: 2, maxMissing: 0, craving: 'coffee', appliances: [] };
+    const request = { kind: 'Ice cream', count: 2, servings: 2, maxMissing: 0, craving: 'coffee', appliances: [], avoidAppliances: [], difficulty: 'any' as const };
     const recipes = await new AiRecipeGenerator(model, 'medium').suggest([stockItem('Natas', 'half carton left')], DEFAULT_PROFILE, request);
 
     assert.equal(recipes.length, 1);
     const prompt = requests[0]!.prompt;
     assert.match(prompt, /Suggest 2 different recipe/);
-    assert.match(prompt, /Type: ice cream/);
+    assert.match(prompt, /Type: Ice cream \(Frozen dessert made in the ice-cream machine\)/);
+    assert.deepEqual((requests[0]!.schema as typeof RECIPE_SCHEMA).properties.recipes.items.properties.kind.enum, DEFAULT_PROFILE.dishTypes.map((d) => d.name));
     assert.match(prompt, /Servings: 2/);
     assert.match(prompt, /- Cecotec Gelacy 1200 Touch ice-cream machine: .*700–850 ml/);
     assert.match(prompt, /- Freezer: Around -15 ºC/);
@@ -126,21 +127,23 @@ describe('AiRecipeGenerator', () => {
   });
 
   it('allows missing ingredients when asked', () => {
-    const prompt = buildRecipePrompt([stockItem('Natas')], DEFAULT_PROFILE, { kind: 'any', count: 1, servings: 3, maxMissing: 2, craving: '', appliances: [] });
+    const prompt = buildRecipePrompt([stockItem('Natas')], DEFAULT_PROFILE, { kind: 'any', count: 1, servings: 3, maxMissing: 2, craving: '', appliances: [], avoidAppliances: [], difficulty: 'any' as const });
     assert.match(prompt, /at most 2 ingredient/);
     assert.match(prompt, /Type: anything/);
     assert.doesNotMatch(prompt, /feel like/);
   });
 
   it('falls back to basic equipment when no appliances are configured', () => {
-    const prompt = buildRecipePrompt([stockItem('Natas')], { ...DEFAULT_PROFILE, appliances: [] }, { kind: 'main', count: 1, servings: 2, maxMissing: 0, craving: '', appliances: [] });
+    const prompt = buildRecipePrompt([stockItem('Natas')], { ...DEFAULT_PROFILE, appliances: [] }, { kind: 'Dinner', count: 1, servings: 2, maxMissing: 0, craving: '', appliances: [], avoidAppliances: [], difficulty: 'any' as const });
     assert.match(prompt, /basic hob and utensils only/);
     assert.doesNotMatch(prompt, /Must use/);
+    assert.doesNotMatch(prompt, /Do not use/);
+    assert.doesNotMatch(prompt, /Difficulty/);
   });
 });
 
 describe('buildRecipePrompt appliance selection', () => {
-  const base = { kind: 'any' as const, count: 1, servings: 2, maxMissing: 0, craving: '' };
+  const base = { kind: 'any', count: 1, servings: 2, maxMissing: 0, craving: '', avoidAppliances: [], difficulty: 'any' as const };
 
   it('requires the one selected appliance', () => {
     const prompt = buildRecipePrompt([stockItem('Natas')], DEFAULT_PROFILE, { ...base, appliances: ['Oven'] });
@@ -150,6 +153,17 @@ describe('buildRecipePrompt appliance selection', () => {
   it('requires all of several selected appliances', () => {
     const prompt = buildRecipePrompt([stockItem('Natas')], DEFAULT_PROFILE, { ...base, appliances: ['Oven', 'Freezer'] });
     assert.match(prompt, /- Must use: Oven \+ Freezer\. Every recipe is built around all of these;/);
+  });
+
+  it('excludes avoided appliances', () => {
+    const prompt = buildRecipePrompt([stockItem('Natas')], DEFAULT_PROFILE, { ...base, appliances: [], avoidAppliances: ['Oven', 'Freezer'] });
+    assert.match(prompt, /- Do not use: Oven, Freezer\. No recipe may need any of these\./);
+    assert.doesNotMatch(prompt, /Must use/);
+  });
+
+  it('states the requested difficulty', () => {
+    const prompt = buildRecipePrompt([stockItem('Natas')], DEFAULT_PROFILE, { ...base, appliances: [], difficulty: 'easy' });
+    assert.match(prompt, /- Difficulty: easy — /);
   });
 });
 

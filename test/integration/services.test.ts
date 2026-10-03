@@ -128,6 +128,12 @@ describe('ProfileService', () => {
     assert.equal(profile.get().servings, 4);
     assert.deepEqual(profile.reset(), DEFAULT_PROFILE);
   });
+
+  it('gives a profile saved before dish types existed the default ones', () => {
+    const { dishTypes: _, ...older } = { ...DEFAULT_PROFILE, servings: 3 };
+    ctx.db.prepare('INSERT INTO kitchen_profiles (user_id, data) VALUES (?, ?)').run(ctx.user.id, JSON.stringify(older));
+    assert.deepEqual(ctx.services.profile.get(), { ...DEFAULT_PROFILE, servings: 3 });
+  });
 });
 
 describe('RecipeService', () => {
@@ -164,7 +170,7 @@ describe('RecipeService', () => {
     const call = ctx.generator.calls[0]!;
     assert.deepEqual(call.stock.map((i) => i.name), ['Natas']);
     assert.equal(call.profile.servings, 4);
-    assert.deepEqual(call.request, { kind: 'dessert', count: 1, servings: 4, maxMissing: 0, craving: 'mango', appliances: [] });
+    assert.deepEqual(call.request, { kind: 'Dessert', count: 1, servings: 4, maxMissing: 0, craving: 'mango', appliances: [], avoidAppliances: [], difficulty: 'any' });
   });
 
   it('lets a request override the default servings', async () => {

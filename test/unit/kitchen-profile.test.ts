@@ -27,6 +27,14 @@ describe('mergeProfile', () => {
     assert.deepEqual(mergeProfile(DEFAULT_PROFILE, { appliances: [] }).appliances, []);
   });
 
+  it('validates dish types: named, unique, and never the reserved "any"', () => {
+    assert.deepEqual(mergeProfile(DEFAULT_PROFILE, { dishTypes: [{ name: ' Brunch ', details: ' Late, slow ' }] }).dishTypes, [{ name: 'Brunch', details: 'Late, slow' }]);
+    assert.deepEqual(mergeProfile(DEFAULT_PROFILE, { dishTypes: [] }).dishTypes, []);
+    assert.throws(() => mergeProfile(DEFAULT_PROFILE, { dishTypes: [{ name: 'Soup' }, { name: 'soup' }] }), /already a dish type/);
+    assert.throws(() => mergeProfile(DEFAULT_PROFILE, { dishTypes: [{ name: 'Any dish' }] }), /reserved/);
+    assert.throws(() => mergeProfile(DEFAULT_PROFILE, { dishTypes: [{ name: '' }] }), /needs a name/);
+  });
+
   it('ignores unknown keys', () => {
     assert.deepEqual(mergeProfile(DEFAULT_PROFILE, { hacker: true }), DEFAULT_PROFILE);
   });

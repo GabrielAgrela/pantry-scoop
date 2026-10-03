@@ -1,11 +1,10 @@
 import { ValidationError } from './errors.ts';
-import type { KitchenProfile } from './kitchen-profile.ts';
+import { ANY_DISH, type DishType, type KitchenProfile } from './kitchen-profile.ts';
 import { normalizeName } from './text.ts';
 
-/** What sort of dish is wanted. 'any' only makes sense as a request, never on a recipe. */
-export const RECIPE_KINDS = ['any', 'ice-cream', 'dessert', 'breakfast', 'main', 'side', 'snack', 'baking', 'drink'] as const;
-export type RecipeKind = (typeof RECIPE_KINDS)[number];
-export const DISH_KINDS = RECIPE_KINDS.filter((kind) => kind !== 'any');
+/** How demanding the recipes may be. 'any' = no preference. */
+export const DIFFICULTIES = ['any', 'easy', 'medium', 'hard'] as const;
+export type Difficulty = (typeof DIFFICULTIES)[number];
 
 export interface RecipeIngredient {
   readonly name: string;
@@ -16,6 +15,7 @@ export interface RecipeIngredient {
 export interface Recipe {
   readonly title: string;
   readonly summary: string;
+  /** A dish type name from the kitchen profile (older recipes: a fixed id such as "main"). */
   readonly kind: string;
   /** Free-form yield, e.g. "4 servings" or "~750 ml mix (6 scoops)". */
   readonly makes: string;
@@ -40,7 +40,8 @@ export interface SavedRecipe {
 }
 
 export interface SuggestionRequest {
-  readonly kind: RecipeKind;
+  /** 'any', or a dish type name as spelled in the kitchen profile. */
+  readonly kind: string;
   readonly count: number;
   readonly servings: number;
   readonly craving: string;
@@ -48,6 +49,9 @@ export interface SuggestionRequest {
   readonly maxMissing: number;
   /** Appliances every recipe must use (names as in the kitchen profile). Empty = no preference. */
   readonly appliances: readonly string[];
+  /** Appliances no recipe may use (names as in the kitchen profile). */
+  readonly avoidAppliances: readonly string[];
+  readonly difficulty: Difficulty;
 }
 
 export const SUGGESTION_LIMITS = { maxCount: 5, maxMissing: 5, maxServings: 20, maxCravingLength: 300 } as const;
@@ -66,10 +70,10 @@ function boundedInt(value: unknown, field: string, fallback: number, min: number
 }
 
 /** Resolves requested appliance names against the kitchen, returning the kitchen's spelling. */
-function requestedAppliances(value: unknown, profile: KitchenProfile): string[] {
+function requestedAppliances(value: unknown, profile: KitchenProfile, field = 'appliances'): string[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value) || !value.every((v) => typeof v === 'string')) {
-    throw new ValidationError('appliances must be a list of names.');
+    throw new ValidationError(`${field} must be a list of names.`);
   }
   const byKey = new Map(profile.appliances.map((a) => [normalizeName(a.name), a.name]));
   const names = value.map((name: string) => {
@@ -80,23 +84,43 @@ function requestedAppliances(value: unknown, profile: KitchenProfile): string[] 
   return [...new Set(names)];
 }
 
-/** Defaults (servings) and allowed appliances come from the kitchen profile. */
+/** The kitchen's dish type a request asks for; undefined for 'any'. */
+export function requestedDishType(request: SuggestionRequest, profile: KitchenProfile): DishType | undefined {
+  return profile.dishTypes.find((dish) => dish.name === request.kind);
+}
+
+function requestedKind(value: unknown, profile: KitchenProfile): string {
+  if (value === undefined || value === null || value === '' || value === ANY_DISH) return ANY_DISH;
+  if (typeof value !== 'string') throw new ValidationError('kind must be text.');
+  const match = profile.dishTypes.find((dish) => normalizeName(dish.name) === normalizeName(value));
+  if (!match) throw new ValidationError(`Unknown kind "${value}". Add it as a dish type first.`);
+  return match.name;
+}
+
+/** Defaults (servings), dish types and allowed appliances come from the kitchen profile. */
 export function createSuggestionRequest(input: unknown, profile: KitchenProfile): SuggestionRequest {
   const raw = (typeof input === 'object' && input !== null ? input : {}) as Record<string, unknown>;
   const craving = raw.craving ?? '';
   if (typeof craving !== 'string') throw new ValidationError('craving must be text.');
   if (craving.length > SUGGESTION_LIMITS.maxCravingLength) throw new ValidationError('craving is too long.');
-  const kind = raw.kind ?? 'any';
-  if (!(RECIPE_KINDS as readonly unknown[]).includes(kind)) {
-    throw new ValidationError(`Unknown kind "${String(kind)}". Use one of: ${RECIPE_KINDS.join(', ')}.`);
+  const kind = requestedKind(raw.kind, profile);
+  const difficulty = raw.difficulty ?? 'any';
+  if (!(DIFFICULTIES as readonly unknown[]).includes(difficulty)) {
+    throw new ValidationError(`Unknown difficulty "${String(difficulty)}". Use one of: ${DIFFICULTIES.join(', ')}.`);
   }
+  const appliances = requestedAppliances(raw.appliances, profile);
+  const avoidAppliances = requestedAppliances(raw.avoidAppliances, profile, 'avoidAppliances');
+  const clash = appliances.find((name) => avoidAppliances.includes(name));
+  if (clash) throw new ValidationError(`"${clash}" cannot be both used and avoided.`);
   return {
-    kind: kind as RecipeKind,
+    kind,
     count: boundedInt(raw.count, 'count', 3, 1, SUGGESTION_LIMITS.maxCount),
     servings: boundedInt(raw.servings, 'servings', profile.servings, 1, SUGGESTION_LIMITS.maxServings),
     maxMissing: boundedInt(raw.maxMissing, 'maxMissing', 0, 0, SUGGESTION_LIMITS.maxMissing),
     craving: craving.trim(),
-    appliances: requestedAppliances(raw.appliances, profile),
+    appliances,
+    avoidAppliances,
+    difficulty: difficulty as Difficulty,
   };
 }
 

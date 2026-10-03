@@ -106,7 +106,7 @@ describe('per-user data', () => {
     assert.equal(stockB.delete(mine.id), false);
     assert.equal(stockA.list().length, 1);
 
-    new SqliteProfileRepository(db, a.id).save({ appliances: [], servings: 4, units: 'g', language: 'EN', preferences: '' });
+    new SqliteProfileRepository(db, a.id).save({ appliances: [], dishTypes: [], servings: 4, units: 'g', language: 'EN', preferences: '' });
     assert.equal(new SqliteProfileRepository(db, b.id).load(), undefined);
   });
 });

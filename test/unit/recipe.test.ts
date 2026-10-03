@@ -8,18 +8,20 @@ const profile = (servings: number) => ({ ...DEFAULT_PROFILE, servings });
 
 describe('createSuggestionRequest', () => {
   it('applies defaults', () => {
-    assert.deepEqual(createSuggestionRequest({}, profile(2)), { kind: 'any', count: 3, servings: 2, maxMissing: 0, craving: '', appliances: [] });
-    assert.deepEqual(createSuggestionRequest(undefined, profile(4)), { kind: 'any', count: 3, servings: 4, maxMissing: 0, craving: '', appliances: [] });
+    assert.deepEqual(createSuggestionRequest({}, profile(2)), { kind: 'any', count: 3, servings: 2, maxMissing: 0, craving: '', appliances: [], avoidAppliances: [], difficulty: 'any' });
+    assert.deepEqual(createSuggestionRequest(undefined, profile(4)), { kind: 'any', count: 3, servings: 4, maxMissing: 0, craving: '', appliances: [], avoidAppliances: [], difficulty: 'any' });
   });
 
   it('accepts form strings and trims the craving', () => {
-    assert.deepEqual(createSuggestionRequest({ kind: 'main', count: '2', servings: '5', maxMissing: '1', craving: ' coffee ' }, profile(2)), {
-      kind: 'main',
+    assert.deepEqual(createSuggestionRequest({ kind: 'dinner', count: '2', servings: '5', maxMissing: '1', craving: ' coffee ' }, profile(2)), {
+      kind: 'Dinner',
       count: 2,
       servings: 5,
       maxMissing: 1,
       craving: 'coffee',
       appliances: [],
+      avoidAppliances: [],
+      difficulty: 'any',
     });
   });
 
@@ -31,6 +33,26 @@ describe('createSuggestionRequest', () => {
   it('rejects appliances that are not in the kitchen', () => {
     assert.throws(() => createSuggestionRequest({ appliances: ['Air fryer'] }, profile(2)), /not in your kitchen/);
     assert.throws(() => createSuggestionRequest({ appliances: 'Oven' }, profile(2)), /list of names/);
+  });
+
+  it('resolves appliances to avoid and rejects one that is both used and avoided', () => {
+    assert.deepEqual(createSuggestionRequest({ avoidAppliances: ['oven'] }, profile(2)).avoidAppliances, ['Oven']);
+    assert.throws(() => createSuggestionRequest({ avoidAppliances: ['Air fryer'] }, profile(2)), /not in your kitchen/);
+    assert.throws(() => createSuggestionRequest({ avoidAppliances: 'Oven' }, profile(2)), /avoidAppliances must be a list/);
+    assert.throws(() => createSuggestionRequest({ appliances: ['Oven'], avoidAppliances: ['oven'] }, profile(2)), /both used and avoided/);
+  });
+
+  it('resolves the dish type to the kitchen spelling', () => {
+    assert.equal(createSuggestionRequest({ kind: 'ICE  CREAM' }, profile(2)).kind, 'Ice cream');
+    assert.equal(createSuggestionRequest({ kind: 'any' }, profile(2)).kind, 'any');
+    const brunch = { ...profile(2), dishTypes: [{ name: 'Brunch', details: '' }] };
+    assert.equal(createSuggestionRequest({ kind: 'brunch' }, brunch).kind, 'Brunch');
+    assert.throws(() => createSuggestionRequest({ kind: 'Dinner' }, brunch), /Unknown kind/);
+  });
+
+  it('accepts a difficulty', () => {
+    assert.equal(createSuggestionRequest({ difficulty: 'easy' }, profile(2)).difficulty, 'easy');
+    assert.throws(() => createSuggestionRequest({ difficulty: 'expert' }, profile(2)), /Unknown difficulty/);
   });
 
   it('rejects out-of-range values', () => {
