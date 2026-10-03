@@ -25,7 +25,10 @@
     "service:install": "systemctl --user link \"$PWD/deploy/pantry-scoop.service\" && systemctl --user daemon-reload && systemctl --user enable --now pantry-scoop.service",
     "service:restart": "systemctl --user restart pantry-scoop.service",
     "service:status": "systemctl --user status pantry-scoop.service --no-pager",
-    "service:logs": "journalctl --user -u pantry-scoop.service -f"
+    "service:logs": "journalctl --user -u pantry-scoop.service -f",
+    "autodeploy:install": "systemctl --user link \"$PWD/deploy/pantry-scoop-autodeploy.service\" && systemctl --user daemon-reload && systemctl --user enable --now pantry-scoop-autodeploy.service",
+    "autodeploy:logs": "journalctl --user -u pantry-scoop-autodeploy.service -f",
+    "autodeploy:status": "systemctl --user status pantry-scoop-autodeploy.service --no-pager"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",

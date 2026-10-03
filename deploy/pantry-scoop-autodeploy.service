@@ -1,0 +1,18 @@
+# systemd *user* unit. Install with: npm run autodeploy:install
+# Redeploys the Docker Compose container whenever src/, public/ or the build files change
+# (checks first, rolls back if the new container is unhealthy). Logs: npm run autodeploy:logs
+[Unit]
+Description=Pantry Scoop auto-deploy watcher
+After=docker.service network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/pantry-scoop
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/node deploy/auto-deploy.mjs
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
