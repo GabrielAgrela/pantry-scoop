@@ -1,5 +1,5 @@
 import { NotFoundError, ValidationError } from '../domain/errors.ts';
-import type { Ingredient } from '../domain/ingredient.ts';
+import { normalizeName, type Ingredient } from '../domain/ingredient.ts';
 import type { KitchenProfile } from '../domain/kitchen-profile.ts';
 import {
   assertRecipe,
@@ -42,8 +42,14 @@ export class RecipeService {
     return { request, stock, profile };
   }
 
-  generate(plan: SuggestionPlan): Promise<Recipe[]> {
-    return this.generator.suggest(plan.stock, plan.profile, plan.request);
+  async generate(plan: SuggestionPlan): Promise<Recipe[]> {
+    return this.withCurrentStock(await this.generator.suggest(plan.stock, plan.profile, plan.request));
+  }
+
+  /** Availability is current pantry state, never the recipe's saved snapshot. */
+  withCurrentStock(recipes: readonly Recipe[]): Recipe[] {
+    const available = new Set(this.stock.listInStock().map((ingredient) => normalizeName(ingredient.name)));
+    return recipes.map((recipe) => ({ ...recipe, ingredients: recipe.ingredients.map((ingredient) => ({ ...ingredient, inStock: available.has(normalizeName(ingredient.name)) })) }));
   }
 
   async suggest(input: unknown): Promise<Recipe[]> {
@@ -51,11 +57,14 @@ export class RecipeService {
   }
 
   listSaved(): SavedRecipe[] {
-    return this.saved.list();
+    const saved = this.saved.list();
+    const current = this.withCurrentStock(saved.map((entry) => entry.recipe));
+    return saved.map((entry, index) => ({ ...entry, recipe: current[index]! }));
   }
 
   save(recipe: unknown): SavedRecipe {
-    return this.saved.insert(assertRecipe(recipe));
+    const saved = this.saved.insert(assertRecipe(recipe));
+    return { ...saved, recipe: this.withCurrentStock([saved.recipe])[0]! };
   }
 
   removeSaved(id: number): void {

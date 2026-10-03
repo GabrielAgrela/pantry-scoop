@@ -395,6 +395,46 @@ describe('scan API', () => {
 });
 
 describe('recipes API', () => {
+  it('updates saved and generated recipe requirements when pantry stock changes', async () => {
+    const call = api(await signIn('alice'));
+    const coconut = (await call('POST', '/api/ingredients', { name: 'Cóconut' })).body.ingredient;
+    const recipe = sampleRecipe({ ingredients: [{ name: ' coconut ', amount: '200 g', inStock: true }, { name: 'Milk', amount: '100 ml', inStock: false }] });
+    ctx.generator.answer = [recipe];
+    const generated = await finished(call, (await call('POST', '/api/recipes/suggestions', { count: 1 })).body.job.id);
+    const saved = (await call('POST', '/api/recipes/saved', { recipe })).body.saved;
+    const readFlags = async (expected: boolean[]) => {
+      const collection = (await call('GET', '/api/recipes/saved')).body.recipes.find((entry: { id: number }) => entry.id === saved.id).recipe;
+      const job = (await call('GET', `/api/jobs/${generated.id}`)).body.job.result.recipes[0];
+      const recent = (await call('GET', '/api/jobs?kind=recipes')).body.jobs[0].result.recipes[0];
+      for (const current of [collection, job, recent]) assert.deepEqual(current.ingredients.map((i: { inStock: boolean }) => i.inStock), expected);
+    };
+    await readFlags([true, false]);
+    await call('PATCH', `/api/ingredients/${coconut.id}`, { inStock: false });
+    const bob = api(await signIn('bob')); await bob('POST', '/api/ingredients', { name: 'Coconut' });
+    await readFlags([false, false]);
+    await call('PATCH', `/api/ingredients/${coconut.id}`, { inStock: true });
+    await call('POST', '/api/ingredients', { name: 'Milk' });
+    await readFlags([true, true]);
+    await call('DELETE', `/api/ingredients/${coconut.id}`);
+    assert.equal((await call('GET', '/api/recipes/saved')).body.recipes[0].recipe.ingredients[0].inStock, false);
+    assert.equal((await call('GET', `/api/jobs/${generated.id}`)).body.job.result.recipes[0].ingredients[0].inStock, false);
+  });
+
+  it('uses current stock when a recipe finishes or a stale recipe is saved', async () => {
+    const call = api(await signIn());
+    const coconut = (await call('POST', '/api/ingredients', { name: 'Coconut' })).body.ingredient;
+    const recipe = sampleRecipe({ ingredients: [{ name: 'Coconut', amount: '200 g', inStock: true }] });
+    let complete!: (recipes: typeof recipe[]) => void;
+    ctx.generator.suggest = async () => new Promise((resolve) => { complete = resolve; });
+    const started = await call('POST', '/api/recipes/suggestions', { count: 1 });
+    await call('PATCH', `/api/ingredients/${coconut.id}`, { inStock: false });
+    complete([recipe]);
+    const job = await finished(call, started.body.job.id);
+    assert.equal(job.result.recipes[0].ingredients[0].inStock, false);
+    assert.equal((await call('POST', '/api/recipes/saved', { recipe })).body.saved.recipe.ingredients[0].inStock, false);
+    assert.equal(recipe.ingredients[0]!.inStock, true, 'refreshing responses does not mutate recipe snapshots');
+  });
+
   it('suggests in the background, saves and deletes recipes', async () => {
     const call = api(await signIn());
     assert.equal((await call('POST', '/api/recipes/suggestions', { count: 1 })).status, 400, 'empty stock is reported at once');
