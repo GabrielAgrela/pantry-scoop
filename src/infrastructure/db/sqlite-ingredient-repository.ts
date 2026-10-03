@@ -51,6 +51,18 @@ export class SqliteIngredientRepository implements IngredientRepository {
     return (rows as unknown as Row[]).map(toIngredient);
   }
 
+  transaction<T>(work: () => T): T {
+    this.db.exec('SAVEPOINT stock_batch');
+    try {
+      const result = work();
+      this.db.exec('RELEASE stock_batch');
+      return result;
+    } catch (error) {
+      this.db.exec('ROLLBACK TO stock_batch; RELEASE stock_batch');
+      throw error;
+    }
+  }
+
   findById(id: number): Ingredient | undefined {
     const row = this.db.prepare(`SELECT ${COLUMNS} FROM ingredients WHERE id = ? AND user_id = ?`).get(id, this.userId);
     return row ? toIngredient(row as unknown as Row) : undefined;

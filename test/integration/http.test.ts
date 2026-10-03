@@ -288,7 +288,83 @@ describe('scan API', () => {
     const job = await finished(call, started.body.job.id);
     assert.equal(job.status, 'succeeded');
     assert.deepEqual(job.result.added.map((i: { name: string }) => i.name), ['Manga']);
+    assert.equal(job.result.reviewRequired, true);
+    assert.deepEqual((await call('GET', '/api/ingredients')).body.ingredients, [], 'detection does not commit stock');
     assert.deepEqual((await call('GET', '/api/jobs?kind=scan&limit=1')).body.jobs.map((j: { id: number }) => j.id), [job.id]);
+  });
+
+  it('confirms only selected ingredients, persists edits, and safely retries after stock changes', async () => {
+    const call = api(await signIn());
+    const eggs = (await call('POST', '/api/ingredients', { name: 'Eggs', category: 'eggs', notes: 'Bottom shelf' })).body.ingredient;
+    await call('PATCH', `/api/ingredients/${eggs.id}`, { inStock: false });
+    ctx.detector.answer = [{ name: 'Tomatoes', category: 'vegetables' }, { name: 'Spinach', category: 'vegetables' }, { name: 'Eggs', category: 'eggs' }];
+    const started = await call('POST', '/api/scan', { images: [TINY_JPEG_DATA_URL] });
+    const job = await finished(call, started.body.job.id);
+    assert.equal((await call('GET', '/api/ingredients')).body.ingredients[0].inStock, false);
+    const response = await call('POST', `/api/scan/${job.id}/confirm`, { ingredients: [
+      { ...job.result.added[0], name: 'Cherry tomatoes', notes: 'Half a punnet' }, { ...job.result.restocked[0], notes: 'Top shelf' },
+    ] });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.job.result.reviewRequired, undefined);
+    const stock = (await call('GET', '/api/ingredients')).body.ingredients;
+    assert.equal(stock.length, 2, 'deselected spinach is never added');
+    assert.ok(stock.some((i: { name: string; notes: string; source: string }) => i.name === 'Cherry tomatoes' && i.notes === 'Half a punnet' && i.source === 'photo'));
+    const restocked = stock.find((i: { id: number }) => i.id === eggs.id);
+    assert.equal(restocked.inStock, true);
+    assert.equal(restocked.notes, 'Top shelf');
+    await call('PATCH', `/api/ingredients/${eggs.id}`, { inStock: false });
+    const again = await call('POST', `/api/scan/${job.id}/confirm`, { ingredients: job.result.restocked });
+    assert.deepEqual(again.body, response.body);
+    assert.equal((await call('GET', '/api/ingredients')).body.ingredients.find((i: { id: number }) => i.id === eggs.id).inStock, false, 'retry never applies a confirmation twice');
+  });
+
+  it('validates the complete review before writes and scopes confirmation to the scan owner', async () => {
+    const call = api(await signIn('alice'));
+    ctx.detector.answer = [{ name: 'Tomatoes', category: 'vegetables' }, { name: 'Eggs', category: 'eggs' }];
+    const job = await finished(call, (await call('POST', '/api/scan', { images: [TINY_JPEG_DATA_URL] })).body.job.id);
+    const bad = await call('POST', `/api/scan/${job.id}/confirm`, { ingredients: [job.result.added[0], { ...job.result.added[1], name: '' }] });
+    assert.equal(bad.status, 400);
+    assert.equal((await call('GET', '/api/ingredients')).body.ingredients.length, 0);
+    assert.equal((await call('GET', `/api/jobs/${job.id}`)).body.job.result.reviewRequired, true);
+    const forged = await call('POST', `/api/scan/${job.id}/confirm`, { ingredients: [{ candidateId: 999, name: 'Fake' }] });
+    assert.equal(forged.status, 400);
+    const repeated = await call('POST', `/api/scan/${job.id}/confirm`, { ingredients: [job.result.added[0], job.result.added[0]] });
+    assert.equal(repeated.status, 400);
+    const bob = api(await signIn('bob'));
+    assert.equal((await bob('POST', `/api/scan/${job.id}/confirm`, { ingredients: job.result.added })).status, 404);
+    assert.equal((await bob('POST', `/api/scan/${job.id}/photos`, { images: [TINY_JPEG_DATA_URL] })).status, 404);
+    const done = await call('POST', `/api/scan/${job.id}/confirm`, { ingredients: [] });
+    assert.equal(done.status, 200, 'zero selections finishes review without writing inventory');
+    assert.equal((await call('GET', '/api/ingredients')).body.ingredients.length, 0);
+  });
+
+  it('rolls back stock when persisting a confirmation fails, then allows a safe retry', async () => {
+    const call = api(await signIn());
+    ctx.detector.answer = [{ name: 'Tomatoes', category: 'vegetables' }];
+    const job = await finished(call, (await call('POST', '/api/scan', { images: [TINY_JPEG_DATA_URL] })).body.job.id);
+    ctx.db.exec("CREATE TRIGGER abort_confirmation BEFORE UPDATE ON jobs BEGIN SELECT RAISE(ABORT, 'test persistence failure'); END");
+    assert.equal((await call('POST', `/api/scan/${job.id}/confirm`, { ingredients: job.result.added })).status, 500);
+    assert.deepEqual((await call('GET', '/api/ingredients')).body.ingredients, []);
+    assert.equal((await call('GET', `/api/jobs/${job.id}`)).body.job.result.reviewRequired, true);
+    ctx.db.exec('DROP TRIGGER abort_confirmation');
+    assert.equal((await call('POST', `/api/scan/${job.id}/confirm`, { ingredients: job.result.added })).status, 200);
+    assert.equal((await call('GET', '/api/ingredients')).body.ingredients.length, 1);
+  });
+
+  it('appends photos without losing earlier detections or duplicating candidates', async () => {
+    const call = api(await signIn());
+    ctx.detector.answer = [{ name: 'Tomatoes', category: 'vegetables' }];
+    const first = await finished(call, (await call('POST', '/api/scan', { images: [TINY_JPEG_DATA_URL] })).body.job.id);
+    ctx.detector.answer = [{ name: 'TOMATOES', category: 'vegetables' }, { name: 'Eggs', category: 'eggs' }];
+    const appended = await call('POST', `/api/scan/${first.id}/photos`, { images: [TINY_JPEG_DATA_URL] });
+    assert.equal(appended.status, 202);
+    const second = await finished(call, appended.body.job.id);
+    assert.equal(second.request.photos, 2);
+    assert.deepEqual(second.result.added.map((i: { name: string }) => i.name), ['Tomatoes', 'Eggs']);
+    assert.equal(new Set(second.result.added.map((i: { candidateId: number }) => i.candidateId)).size, 2);
+    assert.deepEqual((await call('GET', '/api/ingredients')).body.ingredients, []);
+    const tooMany = await call('POST', `/api/scan/${second.id}/photos`, { images: Array(5).fill(TINY_JPEG_DATA_URL) });
+    assert.equal(tooMany.status, 400);
   });
 
   it('rejects bad images up front and records AI problems with a code', async () => {

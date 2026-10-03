@@ -29,6 +29,11 @@ export class StockService {
     return this.repository.list();
   }
 
+  /** Keep a confirmed scan and its persisted outcome atomic. */
+  transaction<T>(work: () => T): T {
+    return this.repository.transaction(work);
+  }
+
   /** What can actually be cooked with right now. */
   listInStock(): Ingredient[] {
     return this.list().filter((ingredient) => ingredient.inStock);

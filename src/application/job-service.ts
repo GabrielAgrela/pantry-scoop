@@ -1,4 +1,4 @@
-import { ConflictError, DomainError } from '../domain/errors.ts';
+import { ConflictError, DomainError, NotFoundError } from '../domain/errors.ts';
 import type { Job, JobKind } from '../domain/job.ts';
 import type { JobRepository } from '../ports/job-repository.ts';
 
@@ -29,6 +29,14 @@ export class JobService {
 
   find(id: number): Job | undefined {
     return this.jobs.find(id);
+  }
+
+  updateResult(id: number, result: unknown): Job {
+    const job = this.jobs.find(id);
+    if (!job) throw new NotFoundError('Job not found.');
+    if (job.status !== 'succeeded') throw new ConflictError('This job is not ready.');
+    this.jobs.succeed(id, result);
+    return this.jobs.find(id)!;
   }
 
   recent(kind: JobKind | undefined, limit = 5): Job[] {

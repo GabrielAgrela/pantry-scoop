@@ -1,6 +1,7 @@
 import type { Ingredient, IngredientChanges, IngredientDraft } from '../domain/ingredient.ts';
 
 export interface IngredientRepository {
+  transaction<T>(work: () => T): T;
   list(): Ingredient[];
   findById(id: number): Ingredient | undefined;
   /** Lookup by the canonical key produced by `normalizeName`. */
