@@ -1,0 +1,10 @@
+[
+  {
+    "key": "pasta",
+    "prompt": "Use case: photorealistic-natural. Asset type: square recipe thumbnail for the Pantry Scoop mobile app. A very tight overhead food photograph of homemade lemon and baby spinach spaghetti in an ivory ceramic bowl on a natural wooden table. Golden spaghetti with dark green wilted spinach, a little lemon zest, fine parmesan, realistic delicious textures, warm daylight. Bowl fills frame and is readable at 100px. Quiet warm food photography matching an ivory and forest green app. No tomatoes, no extra props, no lettering, no watermarks, no interface, no collage. Square composition."
+  },
+  {
+    "key": "skillet",
+    "prompt": "Use case: photorealistic-natural. Asset type: square recipe thumbnail for the Pantry Scoop mobile app. A very tight overhead food photograph of a small rustic dark iron skillet with two sunny eggs nestled in rich cherry tomato sauce, a few fresh spinach leaves, warm natural light, authentic Mediterranean home cooking, imperfect delicious textures. Skillet fills nearly all square frame, subtle weathered oak underneath, clear readable composition when shrunk to 100px. Quiet warm food photography for ivory and forest green app. No lettering, no watermarks, no interface, no collage, no extra props. Square composition."
+  }
+]

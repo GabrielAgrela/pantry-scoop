@@ -88,8 +88,8 @@ export function authRoutes(auth: AuthService, strictLimit: number): FastifyPlugi
 
 function callbackErrorPage(message: string): string {
   const safe = message.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign-in problem · Pantry Scoop</title>
 <link rel="stylesheet" href="/styles.css">
-<main><div class="card stack"><h2>Sign-in didn’t finish</h2><p>${safe}</p><a class="button primary" href="/">Back to Pantry Scoop</a></div></main>`;
+</head><body><main class="auth-error"><div class="card stack"><p class="eyebrow">PANTRY SCOOP / LET’S TRY AGAIN</p><h1>Sign-in didn’t finish</h1><p>${safe}</p><a class="button primary" href="/">Back to Pantry Scoop</a></div></main></body></html>`;
 }

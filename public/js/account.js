@@ -1,5 +1,6 @@
 import { api } from './api.js';
 import { h, MANAGE_USAGE_URL, openDialog, showError, toast } from './dom.js';
+import { icon } from './ui.js';
 
 const manageUsageLink = (label = 'Manage usage') =>
   h('a', { href: MANAGE_USAGE_URL, target: '_blank', rel: 'noopener' }, label);
@@ -35,7 +36,7 @@ export function renderAccount(root, account, { mode, onSignedOut, onEnablePlan }
           : enablePlanPrompt(onEnablePlan),
         planUsageEnabled ? h('label', {}, 'AI model', model) : '',
         // Only needed when ChatGPT can't send phones back here (open-source loopback flow).
-        mode === 'local' ? h('button', { onclick: showPhoneQr }, '📱 Sign in on your phone') : '',
+        mode === 'local' ? h('button', { onclick: showPhoneQr }, icon('pantry'), 'Sign in on your phone') : '',
         signOut,
         h('button', { class: 'danger link', onclick: async () => {
           if (!confirm('Delete your account and everything in it? This can’t be undone.')) return;

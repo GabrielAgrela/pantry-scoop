@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { h } from '../dom.js';
 import { isOnServerMachine, startOnServerMachine, startUrl } from '../sign-in.js';
+import { icon } from '../ui.js';
 
 /**
  * Sign-in screen. With `consent`, it re-runs sign-in asking ChatGPT to show the permission
@@ -41,43 +42,40 @@ export function createLoginView(root, { onSignedIn, consent = false, mode = 'loc
       } catch {
         pasteInput.focus();
       }
-    }, hidden: !navigator.clipboard?.readText }, '📋 Paste from clipboard'),
+    }, hidden: !navigator.clipboard?.readText }, icon('pantry'), 'Paste from clipboard'),
     finish,
   );
 
-  const intro = consent
-    ? 'Allow Pantry Scoop to use your ChatGPT plan.'
-    : 'Scan your pantry. Get recipes that fit it.';
+  const login = h('div', { class: 'login stack' });
+  root.append(
+    h('div', { class: 'login-hero' },
+      h('div', { class: 'login-copy' },
+        h('h1', {}, consent ? 'Connect your ChatGPT plan' : 'Your kitchen, organized.'),
+        h('p', { class: 'login-description' }, consent ? 'Allow plan usage for photo scans and recipe ideas.' : 'Track your ingredients and find recipes that use what you have.'), login),
+      h('div', { class: 'login-photo' }, h('img', { src: '/assets/pantry-editorial.webp', alt: 'Fresh ingredients on a sunny kitchen counter', fetchpriority: 'high' }))),
+  );
 
   // A registered website client (or the server's own machine) gets the normal one-tap sign-in.
   if (mode === 'registered' || isOnServerMachine()) {
     const start = () => (mode === 'registered' ? (location.href = startUrl({ consent })) : startOnServerMachine({ consent }));
-    root.append(
-      h('div', { class: 'card stack login' },
-        h('h2', {}, consent ? 'Use your ChatGPT plan' : 'Welcome to Pantry Scoop'),
-        h('p', {}, intro),
-        h('button', { class: 'primary chatgpt', onclick: start }, 'Continue with ChatGPT'),
-        h('p', { class: 'muted' }, 'Uses your ChatGPT Plus or Pro plan.'),
+    login.append(
+        h('button', { class: 'primary chatgpt', onclick: start }, 'Continue with ChatGPT', icon('arrow')),
+        h('p', { class: 'muted' }, 'Photo scans and recipe ideas use your ChatGPT Plus or Pro plan.'),
         consent ? h('a', { href: '/' }, 'Not now') : '',
-      ),
     );
     return;
   }
 
   // Other devices: ChatGPT can only send the sign-in back to the computer running Pantry Scoop,
   // so phones join an account from there with a QR code.
-  root.append(
-    h('div', { class: 'card stack login' },
-      h('h2', {}, 'Welcome to Pantry Scoop'),
-      h('p', {}, intro),
+  login.append(
       h('div', { class: 'card stack how' },
-        h('strong', {}, 'To sign in on this phone'),
+        h('strong', {}, consent ? 'Connect your ChatGPT plan' : 'Bring your pantry to this device'),
         h('ol', { class: 'steps' },
-          h('li', {}, 'Sign in on the computer running Pantry Scoop.'),
-          h('li', {}, 'There, tap your picture → 📱 Sign in on your phone and scan the code.'),
+          h('li', {}, 'Open Pantry Scoop on its host computer and sign in with ChatGPT.'),
+          h('li', {}, 'Choose “Sign in on your phone” in your account menu, then scan the QR code.'),
         ),
       ),
-      h('details', { class: 'fallback' }, h('summary', {}, 'Other way'), pastePanel),
-    ),
+      h('details', { class: 'fallback' }, h('summary', {}, 'Connect using a sign-in address'), pastePanel),
   );
 }

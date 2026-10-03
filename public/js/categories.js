@@ -21,3 +21,10 @@ export const CATEGORY_LABELS = {
 };
 
 export const categoryLabel = (id) => CATEGORY_LABELS[id] ?? id;
+
+/** Display shelves combine closely related categories without changing stored ingredient data. */
+export const SHELVES = [
+  { id: 'produce', label: 'Produce', categories: ['vegetables', 'fruit'] },
+  { id: 'dairy-eggs', label: 'Dairy & eggs', categories: ['dairy', 'eggs'] },
+  ...Object.keys(CATEGORY_LABELS).filter((id) => !['vegetables', 'fruit', 'dairy', 'eggs'].includes(id)).map((id) => ({ id, label: CATEGORY_LABELS[id], categories: [id] })),
+];

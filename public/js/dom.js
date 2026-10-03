@@ -19,6 +19,7 @@ export function h(tag, attrs = {}, ...children) {
 }
 
 let toastTimer;
+let dialogSequence = 0;
 
 export const MANAGE_USAGE_URL = 'https://chatgpt.com/settings/usage';
 
@@ -40,7 +41,7 @@ export function showError(error) {
 
 /** Runs an async action while a button shows a busy label; reports failures as a toast. */
 export async function withBusy(button, busyLabel, action) {
-  const label = button.textContent;
+  const label = [...button.childNodes];
   button.disabled = true;
   button.textContent = busyLabel;
   try {
@@ -50,13 +51,18 @@ export async function withBusy(button, busyLabel, action) {
     return undefined;
   } finally {
     button.disabled = false;
-    button.textContent = label;
+    button.replaceChildren(...label);
   }
 }
 
 /** Modal dialog that removes itself when closed. Returns { dialog, close }. */
 export function openDialog(className, ...content) {
   const dialog = h('dialog', { class: `card stack ${className}` }, ...content);
+  const heading = dialog.querySelector('h3, h2');
+  if (heading) {
+    heading.id = `dialog-title-${++dialogSequence}`;
+    dialog.setAttribute('aria-labelledby', heading.id);
+  }
   const close = () => {
     dialog.close();
     dialog.remove();
