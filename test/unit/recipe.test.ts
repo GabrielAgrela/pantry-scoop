@@ -4,7 +4,7 @@ import { assertRecipe, createSuggestionRequest, missingIngredients } from '../..
 import { DEFAULT_PROFILE } from '../../src/domain/kitchen-profile.ts';
 import { sampleRecipe } from '../fakes/fixtures.ts';
 
-const profile = (servings: number) => ({ ...DEFAULT_PROFILE, servings });
+const profile = (servings: number) => ({ ...DEFAULT_PROFILE, servings, appliances: [{ name: 'Oven', details: '' }, { name: 'Blender', details: '' }] });
 
 describe('createSuggestionRequest', () => {
   it('applies defaults', () => {

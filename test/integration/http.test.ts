@@ -455,11 +455,24 @@ describe('recipes API', () => {
 describe('profile API', () => {
   it('reads, updates and resets the kitchen profile', async () => {
     const call = api(await signIn());
-    assert.equal((await call('GET', '/api/profile')).body.profile.appliances.length, 5);
+    const fresh = (await call('GET', '/api/profile')).body.profile;
+    assert.equal(fresh.appliances.length, 6);
+    assert.equal(fresh.setupComplete, false);
+    assert.equal(fresh.preferences, '');
     const updated = await call('PUT', '/api/profile', { appliances: [{ name: 'Air fryer', details: '4 L basket' }] });
     assert.deepEqual(updated.body.profile.appliances, [{ name: 'Air fryer', details: '4 L basket' }]);
+    const chosen = [{ name: 'Air fryer', details: '4 L basket', emoji: '🔥' }];
+    assert.deepEqual((await call('PUT', '/api/profile', { appliances: chosen })).body.profile.appliances, chosen);
+    assert.deepEqual((await call('GET', '/api/profile')).body.profile.appliances, chosen);
+    await call('PUT', '/api/profile', { servings: 4 });
+    assert.deepEqual((await call('GET', '/api/profile')).body.profile.appliances, chosen);
+    assert.equal((await call('PUT', '/api/profile', { appliances: [{ name: 'Oven', emoji: 'not emoji' }] })).status, 400);
     assert.equal((await call('PUT', '/api/profile', { servings: 0 })).status, 400);
-    assert.equal((await call('POST', '/api/profile/reset')).body.profile.appliances.length, 5);
+    await call('PUT', '/api/profile', { units: 'Metric', language: 'English', setupStep: 2, setupComplete: true });
+    assert.equal((await call('GET', '/api/profile')).body.profile.setupComplete, true);
+    const reset = (await call('POST', '/api/profile/reset')).body.profile;
+    assert.equal(reset.appliances.length, 6);
+    assert.equal(reset.setupComplete, false);
   });
 });
 

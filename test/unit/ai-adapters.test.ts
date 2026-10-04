@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { AiUnavailableError } from '../../src/domain/errors.ts';
-import { DEFAULT_PROFILE } from '../../src/domain/kitchen-profile.ts';
+import { DEFAULT_PROFILE, LEGACY_PROFILE } from '../../src/domain/kitchen-profile.ts';
 import {
   AiIngredientDetector,
   buildDetectionPrompt,
@@ -109,7 +109,7 @@ describe('AiRecipeGenerator', () => {
   it('puts the stock, machine and request into the prompt', async () => {
     const { model, requests } = fakeModel({ recipes: [sampleRecipe()] });
     const request = { kind: 'Ice cream', count: 2, servings: 2, maxMissing: 0, craving: 'coffee', appliances: [], avoidAppliances: [], difficulty: 'any' as const };
-    const recipes = await new AiRecipeGenerator(model, 'medium').suggest([stockItem('Natas', 'half carton left')], DEFAULT_PROFILE, request);
+    const recipes = await new AiRecipeGenerator(model, 'medium').suggest([stockItem('Natas', 'half carton left')], LEGACY_PROFILE, request);
 
     assert.equal(recipes.length, 1);
     const prompt = requests[0]!.prompt;

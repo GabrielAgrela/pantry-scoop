@@ -3,6 +3,8 @@ import { beforeEach, describe, it } from 'node:test';
 import { AiUnavailableError, ConflictError, NotFoundError, ValidationError } from '../../src/domain/errors.ts';
 import { createDraft } from '../../src/domain/ingredient.ts';
 import { DEFAULT_PROFILE } from '../../src/domain/kitchen-profile.ts';
+import { ProfileService } from '../../src/application/profile-service.ts';
+import { SqliteProfileRepository } from '../../src/infrastructure/db/sqlite-profile-repository.ts';
 import { buildTestServices, sampleRecipe, TINY_JPEG } from '../fakes/fixtures.ts';
 
 let ctx: ReturnType<typeof buildTestServices>;
@@ -130,9 +132,20 @@ describe('ProfileService', () => {
   });
 
   it('gives a profile saved before dish types existed the default ones', () => {
-    const { dishTypes: _, ...older } = { ...DEFAULT_PROFILE, servings: 3 };
+    const { dishTypes: _, setupComplete: _complete, setupStep: _step, ...older } = { ...DEFAULT_PROFILE, servings: 3, appliances: [{ name: 'My oven', details: '200°C' }], preferences: 'Vegetarian' };
     ctx.db.prepare('INSERT INTO kitchen_profiles (user_id, data) VALUES (?, ?)').run(ctx.user.id, JSON.stringify(older));
-    assert.deepEqual(ctx.services.profile.get(), { ...DEFAULT_PROFILE, servings: 3 });
+    assert.deepEqual(ctx.services.profile.get(), { ...DEFAULT_PROFILE, ...older, setupComplete: true });
+  });
+
+  it('persists incomplete setup through appliance saves and completes across service instances', () => {
+    ctx.services.profile.update({ appliances: [{ name: 'Hob', details: '' }], setupStep: 1 });
+    const profile = new ProfileService(new SqliteProfileRepository(ctx.db, ctx.user.id));
+    assert.equal(profile.get().setupComplete, false);
+    assert.equal(profile.get().setupStep, 1);
+    profile.update({ units: 'Metric', language: 'Português', setupStep: 2 });
+    profile.update({ preferences: 'Vegetarian', setupComplete: true });
+    assert.equal(ctx.services.profile.get().setupComplete, true);
+    assert.equal(ctx.services.profile.get().language, 'Português');
   });
 });
 
@@ -155,6 +168,7 @@ describe('RecipeService', () => {
 
   it('passes the desired appliances through', async () => {
     ctx.services.stock.addManual({ name: 'Natas' });
+    ctx.services.profile.update({ appliances: [{ name: 'Oven', details: '' }] });
     await ctx.services.recipes.suggest({ appliances: ['oven'] });
     assert.deepEqual(ctx.generator.calls[0]!.request.appliances, ['Oven']);
   });

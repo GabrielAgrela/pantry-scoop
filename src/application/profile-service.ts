@@ -11,7 +11,7 @@ export class ProfileService {
   /** Profiles saved before a setting existed get its default. */
   get(): KitchenProfile {
     const stored = this.repository.load();
-    return stored ? { ...DEFAULT_PROFILE, ...stored } : DEFAULT_PROFILE;
+    return stored ? { ...DEFAULT_PROFILE, ...stored, setupComplete: stored.setupComplete ?? true } : DEFAULT_PROFILE;
   }
 
   update(input: unknown): KitchenProfile {

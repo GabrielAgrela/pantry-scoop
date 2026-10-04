@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { DEFAULT_PROFILE, type Appliance, type KitchenProfile } from '../../domain/kitchen-profile.ts';
+import { LEGACY_PROFILE as DEFAULT_PROFILE, type Appliance, type KitchenProfile } from '../../domain/kitchen-profile.ts';
 
 export type Migration = string | ((db: DatabaseSync) => void);
 

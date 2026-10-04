@@ -5,6 +5,7 @@ import { normalizeName } from './text.ts';
 export interface Appliance {
   readonly name: string;
   readonly details: string;
+  readonly emoji?: string;
 }
 
 /** A kind of dish the user asks for, and what it means to them (e.g. "made in the ice-cream machine"). */
@@ -25,6 +26,9 @@ export interface KitchenProfile {
   readonly units: string;
   readonly language: string;
   readonly preferences: string;
+  /** Missing on kitchens saved before guided setup existed. */
+  readonly setupComplete?: boolean;
+  readonly setupStep?: number;
 }
 
 export const ICE_CREAM_MACHINE: Appliance = {
@@ -32,7 +36,7 @@ export const ICE_CREAM_MACHINE: Appliance = {
   details: 'Compressor, 1.2 L bowl. Total mix before churning must be 700–850 ml. Churn 30–40 min.',
 };
 
-export const DEFAULT_PROFILE: KitchenProfile = {
+export const LEGACY_PROFILE: KitchenProfile = {
   appliances: [
     ICE_CREAM_MACHINE,
     { name: 'Freezer', details: 'Around -15 ºC: plan for scoopability of frozen desserts.' },
@@ -61,6 +65,25 @@ export const DEFAULT_PROFILE: KitchenProfile = {
   ].join('\n'),
 };
 
+/** Common starting choices, reviewed in setup; no model, capacity or personal diet is assumed. */
+export const DEFAULT_PROFILE: KitchenProfile = {
+  appliances: [
+    { name: 'Oven', details: '', emoji: '♨️' },
+    { name: 'Microwave', details: '', emoji: '📻' },
+    { name: 'Fridge', details: '', emoji: '🧊' },
+    { name: 'Air fryer', details: '', emoji: '🍟' },
+    { name: 'Hob', details: '', emoji: '🍳' },
+    { name: 'Freezer', details: '', emoji: '❄️' },
+  ],
+  dishTypes: LEGACY_PROFILE.dishTypes,
+  servings: 2,
+  units: 'Metric (g, ml, °C)',
+  language: 'English',
+  preferences: '',
+  setupComplete: false,
+  setupStep: 0,
+};
+
 export const PROFILE_LIMITS = { maxAppliances: 20, maxDishTypes: 20, maxNameLength: 80, maxDetailsLength: 500, maxTextLength: 2000, maxServings: 20 } as const;
 
 function text(value: unknown, field: string, max: number): string {
@@ -84,7 +107,17 @@ function appliances(value: unknown): Appliance[] {
   if (value.length > PROFILE_LIMITS.maxAppliances) {
     throw new ValidationError(`At most ${PROFILE_LIMITS.maxAppliances} appliances.`);
   }
-  return value.map((entry, index) => namedEntry(entry, index, 'Appliance'));
+  return value.map((entry, index) => {
+    const appliance = namedEntry(entry, index, 'Appliance');
+    const raw = entry as Record<string, unknown>;
+    if (raw.emoji === undefined) return appliance;
+    const emoji = text(raw.emoji, `${appliance.name} emoji`, 32);
+    const segments = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(emoji)];
+    if (segments.length !== 1 || !/[\p{Extended_Pictographic}\p{Regional_Indicator}\u20e3]/u.test(emoji)) {
+      throw new ValidationError(`${appliance.name} emoji must be a single emoji.`);
+    }
+    return { ...appliance, emoji };
+  });
 }
 
 function dishTypes(value: unknown): DishType[] {
@@ -125,5 +158,13 @@ export function mergeProfile(base: KitchenProfile, input: unknown): KitchenProfi
     units: pick('units', (v) => text(v, 'units', PROFILE_LIMITS.maxTextLength), base.units),
     language: pick('language', (v) => text(v, 'language', PROFILE_LIMITS.maxTextLength), base.language),
     preferences: pick('preferences', (v) => text(v, 'preferences', PROFILE_LIMITS.maxTextLength), base.preferences),
+    setupComplete: pick('setupComplete', (v) => {
+      if (typeof v !== 'boolean') throw new ValidationError('setupComplete must be a boolean.');
+      return v;
+    }, base.setupComplete),
+    setupStep: pick('setupStep', (v) => {
+      if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > 2) throw new ValidationError('setupStep must be between 0 and 2.');
+      return v;
+    }, base.setupStep),
   };
 }

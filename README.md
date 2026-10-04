@@ -20,8 +20,12 @@ needed and there's no shared bill.
   built around all the selected ones), an optional craving and an allowance for 0–3 things to buy.
   Each recipe comes with its yield, time, equipment, kcal/sugar estimates and tips. Save the good ones.
 - **Kitchen**: your appliances, each with free-text limits the AI must respect ("1.2 L bowl, mix
-  700–850 ml", "4 L basket"), plus default servings, units, language and dietary preferences.
+  700–850 ml", "4 L basket"), plus default servings, unit priorities, language and dietary preferences.
 - **Accounts**: every ChatGPT account gets its own pantry, kitchen and saved recipes.
+- **First visit**: Scoop, a floating pantry-jar chef, guides new accounts through two quick steps.
+  Common appliances are already selected; tap to keep or remove them, then review cooking
+  defaults. Dietary preferences and appliance limits are optional. Setup progress is saved
+  to the account. Tap Scoop for a tip, or drag the little chef out of the way.
 
 ## Requirements
 
