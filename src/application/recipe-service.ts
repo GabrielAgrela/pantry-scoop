@@ -1,5 +1,6 @@
 import { NotFoundError, ValidationError } from '../domain/errors.ts';
 import { normalizeName, type Ingredient } from '../domain/ingredient.ts';
+import { ingredientEmoji } from '../domain/ingredient-emoji.ts';
 import type { KitchenProfile } from '../domain/kitchen-profile.ts';
 import {
   assertRecipe,
@@ -48,8 +49,11 @@ export class RecipeService {
 
   /** Availability is current pantry state, never the recipe's saved snapshot. */
   withCurrentStock(recipes: readonly Recipe[]): Recipe[] {
-    const available = new Set(this.stock.listInStock().map((ingredient) => normalizeName(ingredient.name)));
-    return recipes.map((recipe) => ({ ...recipe, ingredients: recipe.ingredients.map((ingredient) => ({ ...ingredient, inStock: available.has(normalizeName(ingredient.name)) })) }));
+    const pantry = new Map(this.stock.list().map((ingredient) => [normalizeName(ingredient.name), ingredient]));
+    return recipes.map((recipe) => ({ ...recipe, ingredients: recipe.ingredients.map((ingredient) => {
+      const known = pantry.get(normalizeName(ingredient.name));
+      return { ...ingredient, inStock: known?.inStock ?? false, emoji: known?.emoji ?? ingredientEmoji(ingredient.name, 'other'), pantryId: known?.id };
+    }) }));
   }
 
   async suggest(input: unknown): Promise<Recipe[]> {

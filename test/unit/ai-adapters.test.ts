@@ -107,9 +107,17 @@ describe('parseDetection', () => {
 });
 
 describe('AiRecipeGenerator', () => {
+  it('passes ranked units to recipes and instructs them to use the first suitable choice', () => {
+    const profile = { ...DEFAULT_PROFILE, units: 'Spoons (tbsp/tsp) → Metric (g, ml, °C)' };
+    const prompt = buildRecipePrompt([stockItem('Natas')], profile, { kind: 'any', count: 1, servings: 2, maxMissing: 0, craving: '', appliances: [], avoidAppliances: [], difficulty: 'any', creativity: 'any' });
+    assert.match(prompt, /Units: Spoons \(tbsp\/tsp\) → Metric \(g, ml, °C\)/);
+    assert.match(prompt, /Use the first suitable unit for each quantity/);
+    assert.match(prompt, /Respect any restrictions in the unit preferences/);
+  });
+
   it('puts the stock, machine and request into the prompt', async () => {
     const { model, requests } = fakeModel({ recipes: [sampleRecipe()] });
-    const request = { kind: 'Ice cream', count: 2, servings: 2, maxMissing: 0, craving: 'coffee', appliances: [], avoidAppliances: [], difficulty: 'any' as const };
+    const request = { kind: 'Ice cream', count: 2, servings: 2, maxMissing: 0, craving: 'coffee', appliances: [], avoidAppliances: [], difficulty: 'any' as const, creativity: 'any' as const };
     const recipes = await new AiRecipeGenerator(model, 'medium').suggest([stockItem('Natas', 'half carton left')], LEGACY_PROFILE, request);
 
     assert.equal(recipes.length, 1);
@@ -128,14 +136,26 @@ describe('AiRecipeGenerator', () => {
   });
 
   it('allows missing ingredients when asked', () => {
-    const prompt = buildRecipePrompt([stockItem('Natas')], DEFAULT_PROFILE, { kind: 'any', count: 1, servings: 3, maxMissing: 2, craving: '', appliances: [], avoidAppliances: [], difficulty: 'any' as const });
+    const prompt = buildRecipePrompt([stockItem('Natas')], DEFAULT_PROFILE, { kind: 'any', count: 1, servings: 3, maxMissing: 2, craving: '', appliances: [], avoidAppliances: [], difficulty: 'any' as const, creativity: 'any' as const });
     assert.match(prompt, /at most 2 ingredient/);
     assert.match(prompt, /Type: anything/);
     assert.doesNotMatch(prompt, /feel like/);
   });
 
+  it('treats each stock line as one indivisible product, even a blend', () => {
+    const prompt = buildRecipePrompt([stockItem('Sal, pimenta e alho')], DEFAULT_PROFILE, { kind: 'any', count: 1, servings: 2, maxMissing: 0, craving: '', appliances: [], avoidAppliances: [], difficulty: 'any' as const, creativity: 'any' as const });
+    assert.match(prompt, /Each stock line is ONE product as bought/);
+    assert.match(prompt, /never take one component out of it/);
+  });
+
+  it('asks for the macros and portions of the whole recipe', () => {
+    const prompt = buildRecipePrompt([stockItem('Natas')], DEFAULT_PROFILE, { kind: 'any', count: 1, servings: 2, maxMissing: 0, craving: '', appliances: [], avoidAppliances: [], difficulty: 'any' as const, creativity: 'any' as const });
+    assert.match(prompt, /protein, carbs \(including sugar\), fat, fibre and salt/);
+    assert.match(prompt, /"portions" is how many servings/);
+  });
+
   it('falls back to basic equipment when no appliances are configured', () => {
-    const prompt = buildRecipePrompt([stockItem('Natas')], { ...DEFAULT_PROFILE, appliances: [] }, { kind: 'Dinner', count: 1, servings: 2, maxMissing: 0, craving: '', appliances: [], avoidAppliances: [], difficulty: 'any' as const });
+    const prompt = buildRecipePrompt([stockItem('Natas')], { ...DEFAULT_PROFILE, appliances: [] }, { kind: 'Dinner', count: 1, servings: 2, maxMissing: 0, craving: '', appliances: [], avoidAppliances: [], difficulty: 'any' as const, creativity: 'any' as const });
     assert.match(prompt, /basic hob and utensils only/);
     assert.doesNotMatch(prompt, /Must use/);
     assert.doesNotMatch(prompt, /Do not use/);
@@ -144,7 +164,7 @@ describe('AiRecipeGenerator', () => {
 });
 
 describe('buildRecipePrompt appliance selection', () => {
-  const base = { kind: 'any', count: 1, servings: 2, maxMissing: 0, craving: '', avoidAppliances: [], difficulty: 'any' as const };
+  const base = { kind: 'any', count: 1, servings: 2, maxMissing: 0, craving: '', avoidAppliances: [], difficulty: 'any' as const, creativity: 'any' as const };
 
   it('requires the one selected appliance', () => {
     const prompt = buildRecipePrompt([stockItem('Natas')], DEFAULT_PROFILE, { ...base, appliances: ['Oven'] });
@@ -166,9 +186,30 @@ describe('buildRecipePrompt appliance selection', () => {
     const prompt = buildRecipePrompt([stockItem('Natas')], DEFAULT_PROFILE, { ...base, appliances: [], difficulty: 'easy' });
     assert.match(prompt, /- Difficulty: easy — /);
   });
+
+  it('separates flavour appeal from difficulty and food safety', () => {
+    for (const [creativity, label] of [['familiar', 'crowd pleaser'], ['creative', 'a little twist'], ['adventurous', 'adventurous']] as const) {
+      const prompt = buildRecipePrompt([stockItem('Natas')], DEFAULT_PROFILE, { ...base, appliances: [], difficulty: 'easy', creativity });
+      assert.match(prompt, /- Difficulty: easy/);
+      assert.ok(prompt.includes(`- Flavour adventure: ${label}`));
+      assert.match(prompt, /Olive oil ice cream is "adventurous" even when easy/);
+      assert.match(prompt, /never food safety/);
+    }
+    const shape = RECIPE_SCHEMA.properties.recipes.items;
+    assert.ok(shape.required.includes('difficulty'));
+    assert.ok(shape.required.includes('creativity'));
+    assert.deepEqual(shape.properties.difficulty.enum, ['easy', 'medium', 'hard']);
+    assert.deepEqual(shape.properties.creativity.enum, ['familiar', 'creative', 'adventurous']);
+  });
 });
 
 describe('parseRecipes', () => {
+  it('requires actual labels for new AI output', () => {
+    const { difficulty, creativity, ...older } = sampleRecipe();
+    assert.throws(() => parseRecipes({ recipes: [older] }), /missing difficulty\/creativity/);
+    assert.throws(() => parseRecipes({ recipes: [{ ...sampleRecipe(), creativity: 'unsafe' }] }), /creativity/);
+    assert.deepEqual(parseRecipes({ recipes: [sampleRecipe({ difficulty: 'easy', creativity: 'adventurous' })] })[0]?.creativity, 'adventurous');
+  });
   it('rejects empty or malformed answers as AI failures', () => {
     assert.throws(() => parseRecipes({ recipes: [] }), AiUnavailableError);
     assert.throws(() => parseRecipes({ recipes: [{ title: 'x' }] }), AiUnavailableError);

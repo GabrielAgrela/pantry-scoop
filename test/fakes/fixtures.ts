@@ -48,6 +48,8 @@ export function identity(subject = 'user-a', email = `${subject}@example.com`): 
 export function sampleRecipe(overrides: Partial<Recipe> = {}): Recipe {
   return {
     title: 'Ferrero-style hazelnut',
+    difficulty: 'easy',
+    creativity: 'familiar',
     summary: 'Nutella, cocoa and toasted hazelnuts.',
     kind: 'ice-cream',
     makes: '~750 ml mix',
@@ -60,7 +62,7 @@ export function sampleRecipe(overrides: Partial<Recipe> = {}): Recipe {
     ],
     steps: ['Blend everything.', 'Churn 30–40 min.'],
     tips: ['1 tbsp vodka keeps it scoopable at -15 ºC.'],
-    estimate: { kcalMin: 950, kcalMax: 1150, sugarGramsMin: 55, sugarGramsMax: 75 },
+    estimate: { kcalMin: 950, kcalMax: 1150, sugarGramsMin: 55, sugarGramsMax: 75, portions: 6, proteinGrams: 30, carbsGrams: 110, fatGrams: 45, fibreGrams: 4, saltGrams: 0.6 },
     ...overrides,
   };
 }

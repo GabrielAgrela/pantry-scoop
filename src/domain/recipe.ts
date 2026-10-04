@@ -5,11 +5,18 @@ import { normalizeName } from './text.ts';
 /** How demanding the recipes may be. 'any' = no preference. */
 export const DIFFICULTIES = ['any', 'easy', 'medium', 'hard'] as const;
 export type Difficulty = (typeof DIFFICULTIES)[number];
+/** Flavour familiarity, independent of cooking difficulty or food safety. */
+export const CREATIVITIES = ['any', 'familiar', 'creative', 'adventurous'] as const;
+export type Creativity = (typeof CREATIVITIES)[number];
 
 export interface RecipeIngredient {
   readonly name: string;
   readonly amount: string;
   readonly inStock: boolean;
+  /** Assigned by the app, including ingredients in older saved recipes. */
+  readonly emoji?: string;
+  /** The matching pantry ingredient, so the recipe can mark it as used up. Assigned by the app. */
+  readonly pantryId?: number;
 }
 
 export interface Recipe {
@@ -20,16 +27,26 @@ export interface Recipe {
   /** Free-form yield, e.g. "4 servings" or "~750 ml mix (6 scoops)". */
   readonly makes: string;
   readonly totalMinutes: number;
+  /** Absent only on recipes created before idea labels were introduced. */
+  readonly difficulty?: Exclude<Difficulty, 'any'>;
+  readonly creativity?: Exclude<Creativity, 'any'>;
   readonly equipment: readonly string[];
   readonly ingredients: readonly RecipeIngredient[];
   readonly steps: readonly string[];
   readonly tips: readonly string[];
-  /** For the whole recipe, not per serving. */
+  /** For the whole recipe, not per serving. Recipes saved before the macros were asked for only carry kcal and sugar. */
   readonly estimate: {
     readonly kcalMin: number;
     readonly kcalMax: number;
     readonly sugarGramsMin: number;
     readonly sugarGramsMax: number;
+    /** How many servings or pieces the whole recipe divides into. */
+    readonly portions?: number;
+    readonly proteinGrams?: number;
+    readonly carbsGrams?: number;
+    readonly fatGrams?: number;
+    readonly fibreGrams?: number;
+    readonly saltGrams?: number;
   };
 }
 
@@ -52,7 +69,10 @@ export interface SuggestionRequest {
   /** Appliances no recipe may use (names as in the kitchen profile). */
   readonly avoidAppliances: readonly string[];
   readonly difficulty: Difficulty;
+  readonly creativity: Creativity;
 }
+
+const OPTIONAL_ESTIMATES = ['portions', 'proteinGrams', 'carbsGrams', 'fatGrams', 'fibreGrams', 'saltGrams'] as const;
 
 export const SUGGESTION_LIMITS = { maxCount: 5, maxMissing: 5, maxServings: 20, maxCravingLength: 300 } as const;
 
@@ -108,6 +128,10 @@ export function createSuggestionRequest(input: unknown, profile: KitchenProfile)
   if (!(DIFFICULTIES as readonly unknown[]).includes(difficulty)) {
     throw new ValidationError(`Unknown difficulty "${String(difficulty)}". Use one of: ${DIFFICULTIES.join(', ')}.`);
   }
+  const creativity = raw.creativity ?? 'any';
+  if (!(CREATIVITIES as readonly unknown[]).includes(creativity)) {
+    throw new ValidationError(`Unknown creativity "${String(creativity)}". Use one of: ${CREATIVITIES.join(', ')}.`);
+  }
   const appliances = requestedAppliances(raw.appliances, profile);
   const avoidAppliances = requestedAppliances(raw.avoidAppliances, profile, 'avoidAppliances');
   const clash = appliances.find((name) => avoidAppliances.includes(name));
@@ -121,6 +145,7 @@ export function createSuggestionRequest(input: unknown, profile: KitchenProfile)
     appliances,
     avoidAppliances,
     difficulty: difficulty as Difficulty,
+    creativity: creativity as Creativity,
   };
 }
 
@@ -141,6 +166,8 @@ export function assertRecipe(value: unknown): Recipe {
   if (!isStr(r.title) || r.title.trim() === '') fail('title');
   if (!isStr(r.summary) || !isStr(r.kind) || !isStr(r.makes)) fail('summary/kind/makes');
   if (!isNum(r.totalMinutes)) fail('totalMinutes');
+  if (r.difficulty !== undefined && !(DIFFICULTIES.slice(1) as readonly unknown[]).includes(r.difficulty)) fail('difficulty');
+  if (r.creativity !== undefined && !(CREATIVITIES.slice(1) as readonly unknown[]).includes(r.creativity)) fail('creativity');
   if (!isStrList(r.equipment)) fail('equipment');
   if (!isStrList(r.steps)) fail('steps');
   if (!isStrList(r.tips)) fail('tips');
@@ -155,5 +182,6 @@ export function assertRecipe(value: unknown): Recipe {
   }
   const e = r.estimate as Record<string, unknown> | undefined;
   if (!e || ![e.kcalMin, e.kcalMax, e.sugarGramsMin, e.sugarGramsMax].every(isNum)) fail('estimate');
+  if (!OPTIONAL_ESTIMATES.every((key) => e![key] === undefined || isNum(e![key]))) fail('estimate');
   return value as Recipe;
 }

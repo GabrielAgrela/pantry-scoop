@@ -8,8 +8,8 @@ const profile = (servings: number) => ({ ...DEFAULT_PROFILE, servings, appliance
 
 describe('createSuggestionRequest', () => {
   it('applies defaults', () => {
-    assert.deepEqual(createSuggestionRequest({}, profile(2)), { kind: 'any', count: 3, servings: 2, maxMissing: 0, craving: '', appliances: [], avoidAppliances: [], difficulty: 'any' });
-    assert.deepEqual(createSuggestionRequest(undefined, profile(4)), { kind: 'any', count: 3, servings: 4, maxMissing: 0, craving: '', appliances: [], avoidAppliances: [], difficulty: 'any' });
+    assert.deepEqual(createSuggestionRequest({}, profile(2)), { kind: 'any', count: 3, servings: 2, maxMissing: 0, craving: '', appliances: [], avoidAppliances: [], difficulty: 'any', creativity: 'any' });
+    assert.deepEqual(createSuggestionRequest(undefined, profile(4)), { kind: 'any', count: 3, servings: 4, maxMissing: 0, craving: '', appliances: [], avoidAppliances: [], difficulty: 'any', creativity: 'any' });
   });
 
   it('accepts form strings and trims the craving', () => {
@@ -22,6 +22,7 @@ describe('createSuggestionRequest', () => {
       appliances: [],
       avoidAppliances: [],
       difficulty: 'any',
+      creativity: 'any',
     });
   });
 
@@ -55,6 +56,13 @@ describe('createSuggestionRequest', () => {
     assert.throws(() => createSuggestionRequest({ difficulty: 'expert' }, profile(2)), /Unknown difficulty/);
   });
 
+  it('accepts flavour preferences and rejects unknown levels', () => {
+    for (const creativity of ['any', 'familiar', 'creative', 'adventurous']) {
+      assert.equal(createSuggestionRequest({ creativity }, profile(2)).creativity, creativity);
+    }
+    assert.throws(() => createSuggestionRequest({ creativity: 'unsafe' }, profile(2)), /Unknown creativity/);
+  });
+
   it('rejects out-of-range values', () => {
     assert.throws(() => createSuggestionRequest({ count: 0 }, profile(2)), /count/);
     assert.throws(() => createSuggestionRequest({ count: 6 }, profile(2)), /count/);
@@ -71,6 +79,20 @@ describe('assertRecipe', () => {
     assert.equal(assertRecipe(recipe), recipe);
   });
 
+  it('accepts recipes saved before the macro estimates', () => {
+    const recipe = { ...sampleRecipe(), estimate: { kcalMin: 900, kcalMax: 1000, sugarGramsMin: 10, sugarGramsMax: 20 } };
+    assert.equal(assertRecipe(recipe), recipe);
+  });
+
+  it('keeps older unclassified recipes readable and validates labels when present', () => {
+    const { difficulty, creativity, ...older } = sampleRecipe();
+    assert.equal(assertRecipe(older), older);
+    assert.throws(() => assertRecipe({ ...older, difficulty: 'any' }), /difficulty/);
+    assert.throws(() => assertRecipe({ ...older, creativity: 'unsafe' }), /creativity/);
+    const adventurous = { ...older, difficulty: 'easy', creativity: 'adventurous' };
+    assert.equal(assertRecipe(adventurous), adventurous);
+  });
+
   it('names the broken field', () => {
     assert.throws(() => assertRecipe({ ...sampleRecipe(), title: '' }), /title/);
     assert.throws(() => assertRecipe({ ...sampleRecipe(), steps: [1] }), /steps/);
@@ -78,6 +100,7 @@ describe('assertRecipe', () => {
     assert.throws(() => assertRecipe({ ...sampleRecipe(), totalMinutes: '20' }), /totalMinutes/);
     assert.throws(() => assertRecipe({ ...sampleRecipe(), ingredients: [{ name: 'x' }] }), /ingredients/);
     assert.throws(() => assertRecipe({ ...sampleRecipe(), estimate: { kcalMin: 1 } }), /estimate/);
+    assert.throws(() => assertRecipe({ ...sampleRecipe(), estimate: { ...sampleRecipe().estimate, proteinGrams: '12' } }), /estimate/);
     assert.throws(() => assertRecipe('nope'), /not an object/);
   });
 });

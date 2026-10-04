@@ -195,13 +195,25 @@ describe('RecipeService', () => {
     const call = ctx.generator.calls[0]!;
     assert.deepEqual(call.stock.map((i) => i.name), ['Natas']);
     assert.equal(call.profile.servings, 4);
-    assert.deepEqual(call.request, { kind: 'Dessert', count: 1, servings: 4, maxMissing: 0, craving: 'mango', appliances: [], avoidAppliances: [], difficulty: 'any' });
+    assert.deepEqual(call.request, { kind: 'Dessert', count: 1, servings: 4, maxMissing: 0, craving: 'mango', appliances: [], avoidAppliances: [], difficulty: 'any', creativity: 'any' });
   });
 
   it('lets a request override the default servings', async () => {
     ctx.services.stock.addManual({ name: 'Ovos' });
     await ctx.services.recipes.suggest({ servings: 6 });
     assert.equal(ctx.generator.calls[0]!.request.servings, 6);
+  });
+
+  it('passes flavour and difficulty separately and preserves labels when saved', async () => {
+    ctx.services.stock.addManual({ name: 'Natas' });
+    ctx.generator.answer = [sampleRecipe({ title: 'Olive oil ice cream', difficulty: 'easy', creativity: 'adventurous' })];
+    const [recipe] = await ctx.services.recipes.suggest({ difficulty: 'easy', creativity: 'adventurous' });
+    assert.equal(ctx.generator.calls[0]!.request.creativity, 'adventurous');
+    assert.equal(ctx.generator.calls[0]!.request.difficulty, 'easy');
+    ctx.services.recipes.save(recipe);
+    const saved = ctx.services.recipes.listSaved()[0]!.recipe;
+    assert.equal(saved.difficulty, 'easy');
+    assert.equal(saved.creativity, 'adventurous');
   });
 
   it('saves, lists and deletes recipes', () => {

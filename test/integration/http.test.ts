@@ -495,9 +495,14 @@ describe('recipes API', () => {
       const collection = (await call('GET', '/api/recipes/saved')).body.recipes.find((entry: { id: number }) => entry.id === saved.id).recipe;
       const job = (await call('GET', `/api/jobs/${generated.id}`)).body.job.result.recipes[0];
       const recent = (await call('GET', '/api/jobs?kind=recipes')).body.jobs[0].result.recipes[0];
-      for (const current of [collection, job, recent]) assert.deepEqual(current.ingredients.map((i: { inStock: boolean }) => i.inStock), expected);
+      for (const current of [collection, job, recent]) {
+        assert.deepEqual(current.ingredients.map((i: { inStock: boolean }) => i.inStock), expected);
+        assert.deepEqual(current.ingredients.map((i: { emoji: string }) => i.emoji), ['🥥', '🥛'], 'older recipe payloads get emojis on every read path');
+      }
     };
     await readFlags([true, false]);
+    const linked = (await call('GET', '/api/recipes/saved')).body.recipes[0].recipe.ingredients;
+    assert.deepEqual(linked.map((i: { pantryId?: number }) => i.pantryId), [coconut.id, undefined], 'each ingredient names its pantry item so the recipe can mark it used up');
     await call('PATCH', `/api/ingredients/${coconut.id}`, { inStock: false });
     const bob = api(await signIn('bob')); await bob('POST', '/api/ingredients', { name: 'Coconut' });
     await readFlags([false, false]);
@@ -507,6 +512,7 @@ describe('recipes API', () => {
     await call('DELETE', `/api/ingredients/${coconut.id}`);
     assert.equal((await call('GET', '/api/recipes/saved')).body.recipes[0].recipe.ingredients[0].inStock, false);
     assert.equal((await call('GET', `/api/jobs/${generated.id}`)).body.job.result.recipes[0].ingredients[0].inStock, false);
+    assert.equal((await call('GET', '/api/recipes/saved')).body.recipes[0].recipe.ingredients[0].pantryId, undefined, 'a deleted pantry item is no longer linked');
   });
 
   it('uses current stock when a recipe finishes or a stale recipe is saved', async () => {
