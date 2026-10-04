@@ -8,6 +8,8 @@ export const COOKIES = {
   signIn: 'ps_signin',
   /** Issued ChatGPT client ID last used in this browser, so sign-in reuses the registration. */
   account: 'ps_account',
+  /** Client ID ChatGPT issued to a sign-in whose code exchange failed; the retry reuses it. */
+  retryClient: 'ps_retry_client',
 } as const;
 
 export function cookieOptions(request: FastifyRequest, maxAgeSeconds: number): CookieSerializeOptions {

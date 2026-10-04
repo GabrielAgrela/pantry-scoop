@@ -44,6 +44,7 @@ interface TokenResponse {
   expires_in?: number;
   scope?: string;
   error?: string;
+  error_description?: string;
 }
 
 /** A registered website client provisioned as confidential (`client_secret_basic`). */
@@ -97,7 +98,7 @@ export class OpenAiOAuthClient implements OpenAiAuth {
   }
 
   async exchangeCode(input: { clientId: string; code: string; codeVerifier: string; redirectUri: string }): Promise<TokenSet> {
-    const { status, body } = await this.post(this.endpoints.tokenEndpoint, {
+    const { status, body, text } = await this.post(this.endpoints.tokenEndpoint, {
       grant_type: 'authorization_code',
       client_id: input.clientId,
       code: input.code,
@@ -108,7 +109,9 @@ export class OpenAiOAuthClient implements OpenAiAuth {
       throw new AiUnavailableError('Could not reach ChatGPT to finish signing in. Try again.');
     });
     if (status !== 200) {
-      throw new AuthRequiredError(`ChatGPT sign-in failed (${body.error ?? status}). Start again.`);
+      // A failed exchange carries no tokens; the raw body is the only clue to why it was refused.
+      const reason = body.error_description ? `${body.error}: ${body.error_description}` : `${status} ${text.slice(0, 400)}`;
+      throw new AuthRequiredError(`ChatGPT sign-in failed (${reason}). Start again.`);
     }
     const tokens = toTokenSet(body);
     if (!tokens.idToken) throw new AuthRequiredError('ChatGPT sign-in did not return an identity. Start again.');
@@ -174,7 +177,7 @@ export class OpenAiOAuthClient implements OpenAiAuth {
     }
   }
 
-  private async post(url: string, form: Record<string, string>): Promise<{ status: number; body: TokenResponse }> {
+  private async post(url: string, form: Record<string, string>): Promise<{ status: number; body: TokenResponse; text: string }> {
     const headers: Record<string, string> = { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' };
     // A confidential client authenticates with HTTP Basic only; the secret never goes in the body.
     if (this.confidential && form.client_id === this.confidential.clientId) {
@@ -195,7 +198,7 @@ export class OpenAiOAuthClient implements OpenAiAuth {
     } catch {
       // non-JSON error page: keep the status only
     }
-    return { status: response.status, body };
+    return { status: response.status, body, text };
   }
 }
 

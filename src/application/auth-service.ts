@@ -1,4 +1,4 @@
-import { AuthRequiredError, ValidationError } from '../domain/errors.ts';
+import { AuthRequiredError, ConflictError, ValidationError } from '../domain/errors.ts';
 import { hasTokens, planUsageEnabled, type ChatGptConnection, type OpenAiIdentity, type User } from '../domain/user.ts';
 import type {
   ConnectionRepository,
@@ -7,6 +7,8 @@ import type {
   UnownedDataClaimer,
   UserRepository,
 } from '../ports/account-repositories.ts';
+import type { GoogleAuth } from '../ports/google-auth.ts';
+import type { LinkedAccountRepository } from '../ports/linked-account-repository.ts';
 import { DYNAMIC_CLIENT_ID, type OpenAiAuth, type TokenSet } from '../ports/openai-auth.ts';
 import { randomToken, sha256 } from './crypto.ts';
 import type { SignInTransactionStore } from './sign-in-transactions.ts';
@@ -20,6 +22,8 @@ export interface AuthSettings {
    * Registered website client: the exact HTTPS callback registered with OpenAI.
    */
   readonly redirectUri: string;
+  /** "Sign in with Google" callback (PUBLIC_URL + /auth/google/callback); unset = Google is off. */
+  readonly googleRedirectUri?: string;
   /**
    * Client ID OpenAI issued for this website (`oaiapp_…`). When set, sign-in uses that
    * registered client and its HTTPS callback, so it works from any device. When unset, each
@@ -44,6 +48,9 @@ export interface AuthDeps {
   readonly sessions: SessionRepository;
   readonly deviceLinks: DeviceLinkRepository;
   readonly openai: OpenAiAuth;
+  /** Present when Google sign-in is configured. */
+  readonly google?: GoogleAuth;
+  readonly linked: LinkedAccountRepository;
   readonly transactions: SignInTransactionStore;
   readonly unownedData: UnownedDataClaimer;
   readonly settings: AuthSettings;
@@ -79,6 +86,20 @@ export interface CallbackInput {
 }
 
 const CALLBACK_PATH = '/auth/callback';
+const ISSUED_CLIENT_ID = /^[\w.-]{1,200}$/;
+
+/**
+ * The code exchange failed after ChatGPT issued a new registration. OpenAI's guidance: start
+ * again with that issued client ID instead of registering yet another one.
+ */
+export class SignInRetryError extends AuthRequiredError {
+  readonly issuedClientId: string;
+
+  constructor(message: string, issuedClientId: string) {
+    super(message);
+    this.issuedClientId = issuedClientId;
+  }
+}
 
 /** "Sign in with ChatGPT" for this app: OAuth + PKCE, account resolution and app sessions. */
 export class AuthService {
@@ -99,12 +120,39 @@ export class AuthService {
     return this.deps.settings.registeredClientId ? 'registered' : 'local';
   }
 
-  startSignIn(options: { accountHint?: string; forceConsent?: boolean; bindingToken?: string } = {}): StartedSignIn {
+  get googleEnabled(): boolean {
+    return this.deps.google !== undefined && this.deps.settings.googleRedirectUri !== undefined;
+  }
+
+  /**
+   * @param options.retainedClientId client ID issued to this browser by a sign-in whose exchange failed.
+   * @param options.linkUserId signed-in user to connect ChatGPT to, instead of signing someone in.
+   */
+  startSignIn(
+    options: {
+      accountHint?: string;
+      forceConsent?: boolean;
+      bindingToken?: string;
+      retainedClientId?: string;
+      linkUserId?: number;
+    } = {},
+  ): StartedSignIn {
     const { settings, openai, transactions } = this.deps;
     const registered = settings.registeredClientId;
-    // With one registered client for everyone, OpenAI's own session picks the account.
-    const returning = !registered && options.accountHint ? this.deps.connections.findByClientId(options.accountHint) : undefined;
+    const link = options.linkUserId;
+    // With one registered client for everyone, OpenAI's own session picks the account. Linking
+    // reuses only the signed-in user's own registration, never another account's on this browser.
+    const returning = registered
+      ? undefined
+      : link !== undefined
+        ? this.deps.connections.find(link)
+        : options.accountHint
+          ? this.deps.connections.findByClientId(options.accountHint)
+          : undefined;
     const returningUser = returning ? this.deps.users.findById(returning.userId) : undefined;
+    const retained = options.retainedClientId;
+    const retry = !registered && !returning && retained && retained !== DYNAMIC_CLIENT_ID && ISSUED_CLIENT_ID.test(retained) ? retained : undefined;
+    const clientId = registered ?? returning?.clientId ?? retry;
 
     const state = randomToken();
     const nonce = randomToken();
@@ -112,22 +160,24 @@ export class AuthService {
     const bindingToken = options.bindingToken || randomToken();
     transactions.put({
       state,
+      provider: 'chatgpt',
+      linkUserId: link,
       nonce,
       codeVerifier,
-      clientId: registered ?? returning?.clientId,
-      expectedUserId: returning?.userId,
+      clientId,
+      expectedUserId: link === undefined ? returning?.userId : undefined,
       bindingHash: sha256(bindingToken),
       expiresAt: this.now() + settings.signInTtlMs,
     });
 
     const authorizeUrl = openai.authorizeUrl({
-      clientId: registered ?? returning?.clientId ?? DYNAMIC_CLIENT_ID,
+      clientId: clientId ?? DYNAMIC_CLIENT_ID,
       redirectUri: settings.redirectUri,
       state,
       nonce,
       codeChallenge: sha256(codeVerifier),
       hostId: registered ? undefined : settings.hostId,
-      agentNameHint: registered || returning ? undefined : settings.appName,
+      agentNameHint: clientId ? undefined : settings.appName,
       loginHint: returningUser?.email || undefined,
       idTokenHint: returning?.idToken || undefined,
       forceConsent: options.forceConsent,
@@ -156,7 +206,7 @@ export class AuthService {
     const { params } = input;
     const state = params.get('state') ?? '';
     const transaction = state ? this.deps.transactions.take(state) : undefined;
-    if (!transaction || transaction.expiresAt <= this.now()) {
+    if (!transaction || transaction.provider !== 'chatgpt' || transaction.expiresAt <= this.now()) {
       throw new AuthRequiredError('This sign-in link expired or was already used. Start again.');
     }
     const bound = input.bindingToken !== undefined && sha256(input.bindingToken) === transaction.bindingHash;
@@ -178,13 +228,33 @@ export class AuthService {
     const clientId = transaction.clientId ?? returnedClientId;
     if (!clientId || clientId === DYNAMIC_CLIENT_ID) throw new AuthRequiredError('ChatGPT did not finish registering this app.');
 
-    const tokens = await this.deps.openai.exchangeCode({
-      clientId,
-      code,
-      codeVerifier: transaction.codeVerifier,
-      redirectUri: this.deps.settings.redirectUri,
-    });
+    const tokens = await this.deps.openai
+      .exchangeCode({
+        clientId,
+        code,
+        codeVerifier: transaction.codeVerifier,
+        redirectUri: this.deps.settings.redirectUri,
+      })
+      .catch((error: unknown) => {
+        if (!transaction.clientId && error instanceof AuthRequiredError) throw new SignInRetryError(error.message, clientId);
+        throw error;
+      });
     const identity = await this.deps.openai.verifyIdToken(tokens.idToken, { clientId, nonce: transaction.nonce });
+    if (transaction.linkUserId !== undefined) {
+      let linked: User;
+      try {
+        linked = this.linkIdentity(transaction.linkUserId, identity, 'ChatGPT');
+      } catch (error) {
+        await this.deps.openai.revoke({ clientId, refreshToken: tokens.refreshToken });
+        throw error;
+      }
+      await this.replaceConnection(linked.id, clientId, tokens);
+      return {
+        ...this.openSession(linked),
+        planUsageEnabled: planUsageEnabled(this.deps.connections.find(linked.id)),
+        accountHint: clientId,
+      };
+    }
     if (!this.isAllowed(identity)) {
       await this.deps.openai.revoke({ clientId, refreshToken: tokens.refreshToken });
       throw new AuthRequiredError(`This Pantry Scoop is private. Ask its owner to add ${identity.email || 'your email'}.`);
@@ -193,7 +263,7 @@ export class AuthService {
     let user = this.deps.users.findBySubject(identity.issuer, identity.subject);
     if (!user && identity.emailVerified) {
       // Same person, new registration (another browser/device): OpenAI issued a new subject.
-      user = this.deps.users.findByVerifiedEmail(identity.issuer, identity.email);
+      user = this.deps.users.findByVerifiedEmail(identity.issuer, identity.email) ?? this.userWithVerifiedEmail(identity.email);
       if (user) this.deps.users.addIdentity(user.id, identity.issuer, identity.subject);
     }
     if (transaction.expectedUserId !== undefined && user?.id !== transaction.expectedUserId) {
@@ -212,6 +282,89 @@ export class AuthService {
       planUsageEnabled: planUsageEnabled(this.deps.connections.find(user.id)),
       accountHint: clientId,
     };
+  }
+
+  /** @param options.linkUserId signed-in user to connect Google to, instead of signing someone in. */
+  startGoogleSignIn(options: { bindingToken?: string; linkUserId?: number } = {}): StartedSignIn {
+    const { google, settings, transactions } = this.deps;
+    if (!google || !settings.googleRedirectUri) throw new ValidationError('Google sign-in is not set up on this Pantry Scoop.');
+    const state = randomToken();
+    const nonce = randomToken();
+    const codeVerifier = randomToken(48);
+    const bindingToken = options.bindingToken || randomToken();
+    transactions.put({
+      state,
+      provider: 'google',
+      linkUserId: options.linkUserId,
+      nonce,
+      codeVerifier,
+      clientId: undefined,
+      expectedUserId: undefined,
+      bindingHash: sha256(bindingToken),
+      expiresAt: this.now() + settings.signInTtlMs,
+    });
+    const authorizeUrl = google.authorizeUrl({
+      redirectUri: settings.googleRedirectUri,
+      state,
+      nonce,
+      codeChallenge: sha256(codeVerifier),
+    });
+    return { authorizeUrl, bindingToken };
+  }
+
+  /** Google always returns to this site, so the browser cookie is always required. */
+  async completeGoogleSignIn(input: { params: URLSearchParams; bindingToken: string | undefined }): Promise<AppSession> {
+    const { google, settings } = this.deps;
+    if (!google || !settings.googleRedirectUri) throw new ValidationError('Google sign-in is not set up on this Pantry Scoop.');
+    const state = input.params.get('state') ?? '';
+    const transaction = state ? this.deps.transactions.take(state) : undefined;
+    if (!transaction || transaction.provider !== 'google' || transaction.expiresAt <= this.now()) {
+      throw new AuthRequiredError('This sign-in link expired or was already used. Start again.');
+    }
+    if (input.bindingToken === undefined || sha256(input.bindingToken) !== transaction.bindingHash) {
+      throw new AuthRequiredError('This sign-in was started in a different browser. Start again here.');
+    }
+    if (input.params.has('error')) {
+      throw new AuthRequiredError(input.params.get('error') === 'access_denied' ? 'Sign-in was cancelled.' : 'Google sign-in could not be completed.');
+    }
+    const code = input.params.get('code');
+    if (!code) throw new AuthRequiredError('The sign-in response had no authorization code.');
+
+    const idToken = await google.exchangeCode({ code, codeVerifier: transaction.codeVerifier, redirectUri: settings.googleRedirectUri });
+    const identity = await google.verifyIdToken(idToken, transaction.nonce);
+    if (transaction.linkUserId !== undefined) return this.openSession(this.linkIdentity(transaction.linkUserId, identity, 'Google'));
+    if (!this.isAllowed(identity)) {
+      throw new AuthRequiredError(`This Pantry Scoop is private. Ask its owner to add ${identity.email || 'your email'}.`);
+    }
+
+    let user = this.deps.users.findBySubject(identity.issuer, identity.subject);
+    if (!user && identity.emailVerified) {
+      // Same verified email as an account made with ChatGPT: that is the same person.
+      user = this.userWithVerifiedEmail(identity.email);
+      if (user) this.deps.users.addIdentity(user.id, identity.issuer, identity.subject);
+    }
+    if (!user) {
+      user = this.deps.users.create(identity);
+      if (this.ownsLegacyData(identity)) this.deps.unownedData.claimUnowned(user.id);
+    }
+    return this.openSession(user);
+  }
+
+  /** Attaches a provider identity to a signed-in user; refuses one that belongs to someone else. */
+  private linkIdentity(userId: number, identity: OpenAiIdentity, label: string): User {
+    const owner = this.deps.users.findBySubject(identity.issuer, identity.subject);
+    if (owner && owner.id !== userId) {
+      throw new ConflictError(`That ${label} account already belongs to another Pantry Scoop account.`);
+    }
+    const user = this.deps.users.findById(userId);
+    if (!user) throw new AuthRequiredError('Please sign in again.');
+    this.deps.users.addIdentity(userId, identity.issuer, identity.subject);
+    return user;
+  }
+
+  private userWithVerifiedEmail(email: string): User | undefined {
+    const id = this.deps.linked.findUserIdByVerifiedEmail(email);
+    return id === undefined ? undefined : this.deps.users.findById(id);
   }
 
   /** Deletes the account and everything in it, and disconnects ChatGPT. */

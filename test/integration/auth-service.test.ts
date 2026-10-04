@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import type { StartedSignIn } from '../../src/application/auth-service.ts';
-import { AuthService } from '../../src/application/auth-service.ts';
+import { AuthService, SignInRetryError } from '../../src/application/auth-service.ts';
 import { AuthRequiredError, ValidationError } from '../../src/domain/errors.ts';
 import { SqliteIngredientRepository } from '../../src/infrastructure/db/sqlite-ingredient-repository.ts';
 import { buildTestContainer, identity } from '../fakes/fixtures.ts';
@@ -71,6 +71,29 @@ describe('AuthService sign-in', () => {
     ctx.openai.nextScopes = ['openid', 'profile', 'email', 'offline_access'];
     const done = await complete(ctx.auth.startSignIn());
     assert.equal(done.planUsageEnabled, false);
+  });
+
+  it('after a failed exchange, retries on the issued client instead of registering again', async () => {
+    ctx.openai.exchangeError = new AuthRequiredError('ChatGPT sign-in failed (invalid_grant). Start again.');
+    const failed = await complete(ctx.auth.startSignIn()).then(
+      () => assert.fail('expected the exchange to fail'),
+      (error: unknown) => error,
+    );
+    assert.ok(failed instanceof SignInRetryError);
+    assert.equal(failed.issuedClientId, 'oaiapp_1');
+
+    const done = await complete(ctx.auth.startSignIn({ retainedClientId: failed.issuedClientId }));
+    const retry = ctx.openai.authorizeCalls[1]!;
+    assert.equal(retry.clientId, 'oaiapp_1');
+    assert.equal(retry.agentNameHint, undefined);
+    assert.equal(ctx.openai.exchanges[1]!.clientId, 'oaiapp_1');
+    assert.equal(done.accountHint, 'oaiapp_1');
+  });
+
+  it('ignores a retained client ID that is not an issued one', () => {
+    ctx.auth.startSignIn({ retainedClientId: 'dynamic_agent_client' });
+    ctx.auth.startSignIn({ retainedClientId: 'bad value&x=1' });
+    assert.deepEqual(ctx.openai.authorizeCalls.map((c) => c.clientId), ['dynamic_agent_client', 'dynamic_agent_client']);
   });
 
   it('can ask OpenAI to show the permission screen again', () => {

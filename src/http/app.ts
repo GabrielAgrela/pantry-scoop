@@ -9,6 +9,7 @@ import type { RecipeService } from '../application/recipe-service.ts';
 import type { ScanService } from '../application/scan-service.ts';
 import type { JobService } from '../application/job-service.ts';
 import type { IngredientClassificationService } from '../application/ingredient-classification-service.ts';
+import type { ConnectionsService } from '../application/connections-service.ts';
 import type { StockService } from '../application/stock-service.ts';
 import { AuthRequiredError, DomainError } from '../domain/errors.ts';
 import { IMAGE_LIMITS } from '../domain/image.ts';
@@ -16,6 +17,7 @@ import { MANAGE_USAGE_URL } from '../infrastructure/openai/responses-client.ts';
 import { COOKIES } from './cookies.ts';
 import { accountRoutes } from './routes/account.ts';
 import { authRoutes } from './routes/auth.ts';
+import { connectionsRoutes } from './routes/connections.ts';
 import { ingredientRoutes } from './routes/ingredients.ts';
 import { jobRoutes } from './routes/jobs.ts';
 import { profileRoutes } from './routes/profile.ts';
@@ -39,6 +41,8 @@ export interface AppContainer {
   readonly forUser: (userId: number) => AppServices;
   /** Configured PUBLIC_URL, if any. */
   readonly publicUrl?: string;
+  /** Linked sign-in providers and the choice of intelligence. */
+  readonly connections: ConnectionsService;
 }
 
 export interface AppOptions {
@@ -95,6 +99,7 @@ export async function buildApp(container: AppContainer, options: AppOptions = {}
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof DomainError) {
+      if (request.url.startsWith('/api/auth/')) request.log.warn({ reason: error.message }, 'sign-in failed');
       const forced = (error as { statusCode?: number }).statusCode;
       return reply.status(forced ?? STATUS_BY_KIND[error.kind]).send({
         error: error.message,
@@ -121,7 +126,8 @@ export async function buildApp(container: AppContainer, options: AppOptions = {}
   const servicesOf: ServicesOf = (request) => container.forUser(request.userId);
 
   const strict = Math.max(5, Math.floor((options.rateLimitPerMinute ?? 300) / 5));
-  await app.register(authRoutes(container.auth, strict));
+  await app.register(authRoutes(container.auth, strict, container.publicUrl));
+  await app.register(connectionsRoutes(container.connections), { prefix: '/api/connections' });
   await app.register(accountRoutes(container.account, container.auth, container.publicUrl), { prefix: '/api/account' });
   await app.register(ingredientRoutes(servicesOf), { prefix: '/api/ingredients' });
   await app.register(scanRoutes(servicesOf), { prefix: '/api/scan' });

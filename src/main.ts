@@ -5,6 +5,8 @@ import { createRemoteJWKSet } from 'jose';
 import { createContainer } from './composition.ts';
 import { loadConfig } from './config.ts';
 import { buildApp } from './http/app.ts';
+import { DeepSeekModel } from './infrastructure/ai/deepseek-model.ts';
+import { GOOGLE_JWKS_URL, GoogleOAuthClient } from './infrastructure/google/google-oauth-client.ts';
 import { scheduleBackups } from './infrastructure/db/backup.ts';
 import { openDatabase } from './infrastructure/db/database.ts';
 import { TokenCipher } from './infrastructure/db/token-cipher.ts';
@@ -28,6 +30,17 @@ const container = createContainer({
         : undefined,
   }),
   responses: new ResponsesClient({ timeoutMs: config.chatgpt.timeoutMs }),
+  googleAuth:
+    config.google.clientId && config.google.clientSecret
+      ? new GoogleOAuthClient({
+          clientId: config.google.clientId,
+          clientSecret: config.google.clientSecret,
+          jwks: createRemoteJWKSet(new URL(GOOGLE_JWKS_URL)),
+        })
+      : undefined,
+  deepseek: config.deepseek.apiKey
+    ? new DeepSeekModel({ apiKey: config.deepseek.apiKey, model: config.deepseek.model, timeoutMs: config.chatgpt.timeoutMs })
+    : undefined,
   onJobError: (error) => console.error('Background job failed', error),
 });
 

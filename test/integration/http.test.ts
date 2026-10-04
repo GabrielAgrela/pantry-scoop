@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
-import { AiUnavailableError, UsageLimitError } from '../../src/domain/errors.ts';
+import { AiUnavailableError, AuthRequiredError, UsageLimitError } from '../../src/domain/errors.ts';
 import { buildApp } from '../../src/http/app.ts';
-import { buildTestContainer, identity, sampleRecipe, TINY_JPEG_DATA_URL } from '../fakes/fixtures.ts';
+import { buildTestContainer, googleIdentity, identity, sampleRecipe, TINY_JPEG_DATA_URL } from '../fakes/fixtures.ts';
 
 let ctx: ReturnType<typeof buildTestContainer>;
 let app: FastifyInstance;
@@ -121,6 +121,32 @@ describe('authentication', () => {
     assert.equal(done.statusCode, 200, done.body);
   });
 
+  it('retries a failed exchange on the client ChatGPT issued to this browser', async () => {
+    const start = await app.inject({ method: 'GET', url: '/auth/chatgpt/start' });
+    const cookie = cookieFrom(start, 'ps_signin')!;
+    ctx.openai.exchangeError = new AuthRequiredError('ChatGPT sign-in failed (invalid_grant). Start again.');
+    const failed = await app.inject({
+      method: 'POST',
+      url: '/api/auth/complete',
+      cookies: { ps_signin: cookie },
+      payload: { callbackUrl: `http://127.0.0.1:3210/auth/callback?${ctx.openai.callbackParams()}` },
+    });
+    assert.equal(failed.statusCode, 401);
+    const retryClient = cookieFrom(failed, 'ps_retry_client');
+    assert.equal(retryClient, 'oaiapp_1');
+
+    await app.inject({ method: 'GET', url: '/auth/chatgpt/start', cookies: { ps_signin: cookie, ps_retry_client: retryClient! } });
+    assert.equal(ctx.openai.authorizeCalls.at(-1)!.clientId, 'oaiapp_1');
+    const done = await app.inject({
+      method: 'POST',
+      url: '/api/auth/complete',
+      cookies: { ps_signin: cookie, ps_retry_client: retryClient! },
+      payload: { callbackUrl: `http://127.0.0.1:3210/auth/callback?${ctx.openai.callbackParams()}` },
+    });
+    assert.equal(done.statusCode, 200, done.body);
+    assert.equal(cookieFrom(done, 'ps_retry_client'), '');
+  });
+
   it('rejects a pasted address without the starting browser’s cookie', async () => {
     await app.inject({ method: 'GET', url: '/auth/chatgpt/start' });
     const response = await api(undefined)('POST', '/api/auth/complete', {
@@ -178,13 +204,13 @@ describe('hardening', () => {
 
 describe('sign-in mode', () => {
   it('tells the front-end which sign-in flow is active', async () => {
-    assert.deepEqual((await api(undefined)('GET', '/api/auth/config')).body, { mode: 'local' });
+    assert.deepEqual((await api(undefined)('GET', '/api/auth/config')).body, { mode: 'local', google: true });
   });
 
   it('with a registered client, requires the browser cookie even for local (tunnel) requests', async () => {
     const registered = buildTestContainer(Date.now, { registeredClientId: 'oaiapp_site' });
     const site = await buildApp(registered.container);
-    assert.deepEqual(JSON.parse((await site.inject({ method: 'GET', url: '/api/auth/config' })).body), { mode: 'registered' });
+    assert.deepEqual(JSON.parse((await site.inject({ method: 'GET', url: '/api/auth/config' })).body), { mode: 'registered', google: true });
 
     await site.inject({ method: 'GET', url: '/auth/chatgpt/start' });
     const query = registered.openai.callbackParams().toString();
@@ -584,5 +610,91 @@ describe('static files', () => {
     const response = await withStatic.inject({ method: 'GET', url: '/' });
     assert.equal(response.statusCode, 200);
     assert.match(response.body, /hi/);
+  });
+});
+
+describe('Google sign-in and linked accounts over HTTP', () => {
+  /** Runs "Continue with Google" end to end (optionally while signed in) and returns the response. */
+  async function viaGoogle(session?: string) {
+    const start = await app.inject({ method: 'GET', url: '/auth/google/start', cookies: session ? { ps_session: session } : {} });
+    assert.equal(start.statusCode, 302);
+    assert.match(start.headers.location as string, /^https:\/\/accounts\.example\/authorize/);
+    const signInCookie = cookieFrom(start, 'ps_signin')!;
+    return app.inject({
+      method: 'GET',
+      url: `/auth/google/callback?${ctx.google.callbackParams()}`,
+      cookies: { ps_signin: signInCookie, ...(session ? { ps_session: session } : {}) },
+    });
+  }
+
+  it('signs in with Google and lands on the app with a session', async () => {
+    const done = await viaGoogle();
+    assert.equal(done.statusCode, 302);
+    assert.equal(done.headers.location, '/');
+    const session = cookieFrom(done, 'ps_session')!;
+    const account = await api(session)('GET', '/api/account');
+    assert.equal(account.status, 200);
+    assert.equal(account.body.user.email, 'user-a@example.com');
+    const connections = await api(session)('GET', '/api/connections');
+    assert.equal(connections.body.google, true);
+    assert.equal(connections.body.aiProvider, 'deepseek');
+  });
+
+  it('shows a readable page when Google sign-in fails', async () => {
+    const start = await app.inject({ method: 'GET', url: '/auth/google/start' });
+    ctx.google.exchangeError = new AuthRequiredError('Google sign-in failed (invalid_grant). Start again.');
+    const done = await app.inject({
+      method: 'GET',
+      url: `/auth/google/callback?${ctx.google.callbackParams()}`,
+      cookies: { ps_signin: cookieFrom(start, 'ps_signin')! },
+    });
+    assert.equal(done.statusCode, 400);
+    assert.match(done.body, /Sign-in didn’t finish/);
+    assert.match(done.body, /invalid_grant/);
+  });
+
+  it('starts Google sign-in on the public address so the cookie comes back', async () => {
+    const site = await buildApp({ ...ctx.container, publicUrl: 'https://pantry.example.com' });
+    const elsewhere = await site.inject({ method: 'GET', url: '/auth/google/start', headers: { host: '127.0.0.1:3210' } });
+    assert.equal(elsewhere.headers.location, 'https://pantry.example.com/auth/google/start');
+    const home = await site.inject({ method: 'GET', url: '/auth/google/start', headers: { host: 'pantry.example.com' } });
+    assert.match(home.headers.location as string, /^https:\/\/accounts\.example\//);
+  });
+
+  it('connects Google to a signed-in ChatGPT account and ChatGPT to a signed-in Google account', async () => {
+    const chatgptSession = await signIn('user-a');
+    ctx.google.nextIdentity = googleIdentity('g-other', 'someone-else@example.com');
+    const linked = await viaGoogle(chatgptSession);
+    assert.equal(linked.statusCode, 302);
+    const view = await api(chatgptSession)('GET', '/api/connections');
+    assert.equal(view.body.chatgpt, true);
+    assert.equal(view.body.google, true);
+
+    ctx.google.nextIdentity = googleIdentity('g-new', 'new@example.com');
+    const googleSession = cookieFrom(await viaGoogle(), 'ps_session')!;
+    ctx.openai.nextIdentity = identity('chatgpt-new', 'new-chatgpt@example.com');
+    const start = await app.inject({ method: 'GET', url: '/auth/chatgpt/start', cookies: { ps_session: googleSession } });
+    await app.inject({ method: 'GET', url: `/auth/callback?${ctx.openai.callbackParams()}`, cookies: { ps_signin: cookieFrom(start, 'ps_signin')! } });
+    const after = await api(googleSession)('GET', '/api/connections');
+    assert.equal(after.body.chatgpt, true);
+    assert.equal(after.body.chatgptPlan, true);
+  });
+
+  it('changes the intelligence and disconnects providers through the API', async () => {
+    const session = await signIn('user-a');
+    const call = api(session);
+    assert.equal((await call('PUT', '/api/connections/ai', { provider: 'deepseek' })).body.aiProvider, 'deepseek');
+    assert.equal((await call('PUT', '/api/connections/ai', { provider: 'nope' })).status, 400);
+    assert.equal((await call('POST', '/api/connections/disconnect', { provider: 'chatgpt' })).status, 409);
+
+    await viaGoogle(session);
+    const disconnected = await call('POST', '/api/connections/disconnect', { provider: 'chatgpt' });
+    assert.equal(disconnected.status, 200);
+    assert.equal(disconnected.body.chatgpt, false);
+    assert.equal((await api(undefined)('GET', '/api/connections')).status, 401);
+  });
+
+  it('tells the front-end Google is available', async () => {
+    assert.deepEqual((await api(undefined)('GET', '/api/auth/config')).body, { mode: 'local', google: true });
   });
 });

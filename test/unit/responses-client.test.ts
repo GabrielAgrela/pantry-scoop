@@ -53,6 +53,10 @@ describe('readStream', () => {
   it('surfaces failures that arrive mid-stream', async () => {
     const limit = sse({ type: 'response.failed', response: { error: { code: 'subscription_sharing_usage_limit_exceeded' } } });
     await assert.rejects(readStream(stream(limit)), UsageLimitError);
+    await assert.rejects(readStream(stream(sse({ type: 'response.failed', response: { id: 'resp_9', error: { code: 'server_error', message: 'The model had a problem.' } } }))),
+      { message: 'ChatGPT request failed (server_error): The model had a problem (request resp_9). Try again.' });
+    await assert.rejects(readStream(stream(sse({ type: 'error', message: 'Invalid schema for response_format' }))), { message: 'ChatGPT request failed: Invalid schema for response_format. Try again.' });
+    await assert.rejects(readStream(stream(sse({ type: 'error', error: { code: 'invalid_json_schema', message: 'Bad schema' } }))), /\(invalid_json_schema\): Bad schema/);
     await assert.rejects(readStream(stream(sse({ type: 'response.incomplete', response: { incomplete_details: { reason: 'max_output_tokens' } } }))), /max_output_tokens/);
   });
 });

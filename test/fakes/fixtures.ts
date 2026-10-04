@@ -3,6 +3,9 @@ import type { IngredientClassification, IngredientClassifier } from '../../src/p
 import type { DatabaseSync } from 'node:sqlite';
 import { AccountService } from '../../src/application/account-service.ts';
 import { AuthService } from '../../src/application/auth-service.ts';
+import { ConnectionsService } from '../../src/application/connections-service.ts';
+import { SqliteLinkedAccountRepository } from '../../src/infrastructure/db/sqlite-linked-account-repository.ts';
+import { GOOGLE_ISSUER, type GoogleAuth, type GoogleAuthorizeParams } from '../../src/ports/google-auth.ts';
 import { ProfileService } from '../../src/application/profile-service.ts';
 import { RecipeService } from '../../src/application/recipe-service.ts';
 import { ScanService } from '../../src/application/scan-service.ts';
@@ -113,6 +116,8 @@ export class FakeOpenAiAuth implements OpenAiAuth {
   refreshes: { clientId: string; refreshToken: string }[] = [];
   revoked: { clientId: string; refreshToken: string }[] = [];
   revokeSucceeds = true;
+  /** When set, the next code exchange fails with it (once). */
+  exchangeError: Error | undefined;
   private counter = 0;
 
   authorizeUrl(params: AuthorizeParams): string {
@@ -130,6 +135,9 @@ export class FakeOpenAiAuth implements OpenAiAuth {
 
   async exchangeCode(input: { clientId: string; code: string; codeVerifier: string; redirectUri: string }): Promise<TokenSet> {
     this.exchanges.push(input);
+    const failure = this.exchangeError;
+    this.exchangeError = undefined;
+    if (failure) throw failure;
     const n = this.exchanges.length;
     return {
       accessToken: `access-${n}`,
@@ -161,6 +169,43 @@ export class FakeOpenAiAuth implements OpenAiAuth {
   }
 
   async verifyIdToken(): Promise<OpenAiIdentity> {
+    return this.nextIdentity;
+  }
+}
+
+export function googleIdentity(subject = 'g-user-a', email = 'user-a@example.com'): OpenAiIdentity {
+  return { issuer: GOOGLE_ISSUER, subject, email, emailVerified: true, name: `Google ${subject}`, picture: 'https://pic.example/a.png' };
+}
+
+/** Stands in for accounts.google.com: every code exchanges for `nextIdentity`. */
+export class FakeGoogleAuth implements GoogleAuth {
+  nextIdentity: OpenAiIdentity = googleIdentity();
+  /** When set, the next exchange fails with it (once). */
+  exchangeError: Error | undefined;
+  authorizeCalls: GoogleAuthorizeParams[] = [];
+  exchanges: { code: string; codeVerifier: string; redirectUri: string }[] = [];
+  verifiedNonces: string[] = [];
+
+  authorizeUrl(params: GoogleAuthorizeParams): string {
+    this.authorizeCalls.push(params);
+    return `https://accounts.example/authorize?state=${params.state}`;
+  }
+
+  callbackParams(overrides: Record<string, string> = {}): URLSearchParams {
+    const last = this.authorizeCalls.at(-1)!;
+    return new URLSearchParams({ code: `g-code-${this.authorizeCalls.length}`, state: last.state, ...overrides });
+  }
+
+  async exchangeCode(input: { code: string; codeVerifier: string; redirectUri: string }): Promise<string> {
+    this.exchanges.push(input);
+    const failure = this.exchangeError;
+    this.exchangeError = undefined;
+    if (failure) throw failure;
+    return `g-id-${this.exchanges.length}`;
+  }
+
+  async verifyIdToken(_idToken: string, nonce: string): Promise<OpenAiIdentity> {
+    this.verifiedNonces.push(nonce);
     return this.nextIdentity;
   }
 }
@@ -215,11 +260,13 @@ export function buildTestServices() {
 /** Full container (real auth + accounts over SQLite, fake OpenAI and AI) for HTTP tests. */
 export function buildTestContainer(
   now: () => number = () => FIXED_NOW().getTime(),
-  options: { registeredClientId?: string; allowedEmails?: string[]; ownerEmail?: string } = {},
+  options: { registeredClientId?: string; allowedEmails?: string[]; ownerEmail?: string; google?: boolean; deepseek?: boolean } = {},
 ) {
   const db = openDatabase(':memory:');
   const repos = accountRepos(db);
+  const linked = new SqliteLinkedAccountRepository(db);
   const openai = new FakeOpenAiAuth();
+  const google = options.google === false ? undefined : new FakeGoogleAuth();
   const detector = new FakeDetector();
   const generator = new FakeGenerator();
   const classifier = new FakeClassifier();
@@ -227,11 +274,14 @@ export function buildTestContainer(
   const auth = new AuthService({
     ...repos,
     openai,
+    google,
+    linked,
     transactions: new InMemorySignInTransactionStore(now),
     settings: {
       appName: 'Pantry Scoop',
       hostId: 'urn:uuid:00000000-0000-4000-8000-000000000000',
       redirectUri: options.registeredClientId ? 'https://pantry.example.com/auth/callback' : 'http://127.0.0.1:3210/auth/callback',
+      googleRedirectUri: google ? 'https://pantry.example.com/auth/google/callback' : undefined,
       registeredClientId: options.registeredClientId,
       allowedEmails: options.allowedEmails,
       ownerEmail: options.ownerEmail,
@@ -241,10 +291,15 @@ export function buildTestContainer(
     },
     now,
   });
+  const connections = new ConnectionsService(linked, repos.connections, openai, {
+    googleAvailable: google !== undefined,
+    deepseekAvailable: options.deepseek !== false,
+  });
   const container: AppContainer = {
     auth,
     account: new AccountService(repos.users, repos.connections, catalog),
+    connections,
     forUser: (userId) => servicesFor(db, userId, detector, generator, classifier),
   };
-  return { db, repos, openai, detector, generator, classifier, catalog, auth, container };
+  return { db, repos, linked, openai, google: google!, detector, generator, classifier, catalog, auth, connections, container };
 }

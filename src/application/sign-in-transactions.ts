@@ -1,6 +1,10 @@
 /** A sign-in that has been started in the browser but not completed yet. */
 export interface SignInTransaction {
   readonly state: string;
+  /** Which provider's callback may complete it (a Google state can't finish a ChatGPT sign-in). */
+  readonly provider: 'chatgpt' | 'google';
+  /** Signed-in user this sign-in links the new identity to, instead of signing someone in. */
+  readonly linkUserId?: number;
   readonly nonce: string;
   readonly codeVerifier: string;
   /** Issued client ID for a returning account, or undefined for a first registration. */

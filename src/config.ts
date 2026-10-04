@@ -34,6 +34,20 @@ export interface Config {
     readonly recipeEffort: ReasoningEffort;
     readonly timeoutMs: number;
   };
+  /** "Sign in with Google" web client; unset = no Google sign-in. Callback: PUBLIC_URL + /auth/google/callback. */
+  readonly google: {
+    readonly clientId: string | undefined;
+    readonly clientSecret: string | undefined;
+  };
+  /** DeepSeek, the alternative to each person's ChatGPT plan; unset = ChatGPT plans only. */
+  readonly deepseek: {
+    readonly apiKey: string | undefined;
+    readonly model: string;
+    /** Thinking per task: minimal = off, low, medium/high = high. */
+    readonly scanEffort: ReasoningEffort;
+    readonly recipeEffort: ReasoningEffort;
+    readonly sortEffort: ReasoningEffort;
+  };
 }
 
 export const APP_NAME = 'Pantry Scoop';
@@ -91,6 +105,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       recipeEffort: effort(env.CHATGPT_RECIPE_EFFORT, 'medium'),
       timeoutMs: positiveInt(env.CHATGPT_TIMEOUT_MS, 'CHATGPT_TIMEOUT_MS', 180_000),
     },
+    google: {
+      clientId: env.GOOGLE_CLIENT_ID || undefined,
+      clientSecret: env.GOOGLE_CLIENT_SECRET || undefined,
+    },
+    deepseek: {
+      apiKey: env.DEEPSEEK_API_KEY || undefined,
+      model: env.DEEPSEEK_MODEL || 'deepseek-flash',
+      // Benchmarked on a real spice-rack photo: only high thinking read every label; recipes are
+      // good from low; sorting is right with thinking off.
+      scanEffort: effort(env.DEEPSEEK_SCAN_EFFORT, 'high'),
+      recipeEffort: effort(env.DEEPSEEK_RECIPE_EFFORT, 'low'),
+      sortEffort: effort(env.DEEPSEEK_SORT_EFFORT, 'minimal'),
+    },
   };
 }
 
@@ -101,6 +128,14 @@ const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\])$/;
  * - Registered website client: PUBLIC_URL + /auth/callback (must match the registration exactly).
  * - Open-source flow: a loopback callback; only the port may vary.
  */
+/** Google needs one fixed, registered HTTPS callback, so it requires PUBLIC_URL. */
+export function googleRedirectUriFor(config: Pick<Config, 'publicUrl' | 'google'>): string | undefined {
+  if (!config.google.clientId) return undefined;
+  if (!config.google.clientSecret) throw new ValidationError('GOOGLE_CLIENT_ID needs GOOGLE_CLIENT_SECRET.');
+  if (!config.publicUrl) throw new ValidationError('GOOGLE_CLIENT_ID needs PUBLIC_URL (the address registered with Google).');
+  return `${config.publicUrl}/auth/google/callback`;
+}
+
 export function redirectUriFor(config: Pick<Config, 'port' | 'publicUrl' | 'openai'>): string {
   if (!config.openai.clientId) return `http://127.0.0.1:${config.port}/auth/callback`;
   if (!config.publicUrl) throw new ValidationError('OPENAI_CLIENT_ID needs PUBLIC_URL (your HTTPS address).');

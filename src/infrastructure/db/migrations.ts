@@ -144,6 +144,25 @@ export const MIGRATIONS: readonly Migration[] = [
     const update = db.prepare('UPDATE ingredients SET emoji = ? WHERE id = ?');
     for (const row of rows) update.run(ingredientEmoji(row.name, row.category), row.id);
   },
+  // 9 — notification history is account-scoped and independent of job retention.
+  `CREATE TABLE notifications (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+     message TEXT NOT NULL,
+     level TEXT NOT NULL CHECK (level IN ('success', 'error')),
+     action TEXT,
+     event_id TEXT,
+     created_at TEXT NOT NULL,
+     read_at TEXT
+   );
+   CREATE UNIQUE INDEX notifications_event ON notifications (user_id, event_id);
+   CREATE INDEX notifications_user ON notifications (user_id, id);
+   CREATE INDEX notifications_unread ON notifications (user_id, id) WHERE read_at IS NULL;`,
+  // 10 — accounts can also sign in with Google, and pick ChatGPT or another AI for scans and recipes
+  //      ('' = automatic). The extra identities reuse user_identities.
+  `ALTER TABLE users ADD COLUMN ai_provider TEXT NOT NULL DEFAULT '';`,
+  // 11 — DeepSeek replaced Mistral as the alternative to a ChatGPT plan.
+  `UPDATE users SET ai_provider = 'deepseek' WHERE ai_provider = 'mistral';`,
 ];
 
 interface LegacyProfile {

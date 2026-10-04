@@ -128,7 +128,10 @@ export function errorFromApi(status: number, error: ApiError, requestId = ''): E
   if (status === 401) return new AuthRequiredError('Your ChatGPT connection is no longer valid. Sign in again.');
   if (status === 429) return new UsageLimitError('ChatGPT usage limit reached. Review your usage in ChatGPT settings.');
   if (status === 403) return new AiUnavailableError(`ChatGPT refused the request: ${error.message ?? 'not permitted'}${ref}`);
-  return new AiUnavailableError(`ChatGPT request failed (${error.code ?? status})${ref}. Try again.`);
+  // Failures inside the stream have no HTTP status; their code and message are all there is to go on.
+  const reason = error.code ?? (status || undefined);
+  const detail = error.message ? `: ${error.message.trim().replace(/\.$/, '')}` : '';
+  return new AiUnavailableError(`ChatGPT request failed${reason ? ` (${reason})` : ''}${detail}${ref}. Try again.`);
 }
 
 async function toError(response: Response): Promise<Error> {
@@ -151,7 +154,10 @@ interface StreamEvent {
   code?: string;
   message?: string;
   param?: string;
+  /** Some backends nest the details of an `error` event here instead. */
+  error?: ApiError | null;
   response?: {
+    id?: string;
     error?: ApiError | null;
     incomplete_details?: { reason?: string } | null;
     output?: { content?: { type?: string; text?: string }[] }[];
@@ -184,11 +190,11 @@ export async function readStream(stream: ReadableStream<Uint8Array>): Promise<st
         }
         break;
       case 'response.failed':
-        throw errorFromApi(0, event.response?.error ?? {});
+        throw errorFromApi(0, event.response?.error ?? {}, event.response?.id);
       case 'response.incomplete':
         throw new AiUnavailableError(`ChatGPT stopped early (${event.response?.incomplete_details?.reason ?? 'incomplete'}). Try again.`);
       case 'error':
-        throw errorFromApi(0, { code: event.code, message: event.message, param: event.param });
+        throw errorFromApi(0, event.error ?? { code: event.code, message: event.message, param: event.param });
     }
   };
 
