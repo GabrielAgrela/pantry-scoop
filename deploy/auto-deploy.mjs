@@ -19,6 +19,8 @@ const PREVIOUS = 'pantry-scoop:previous';
 // Everything that goes into the image (see Dockerfile).
 const WATCHED_DIRS = ['src', 'public'];
 const WATCHED_FILES = new Set(['package.json', 'package-lock.json', 'Dockerfile', 'docker-compose.yml']);
+// Editor scratch files (sed -i's sedXXXXXX, vim swap, backups) are not source changes.
+const SCRATCH = /(^|\/)(sed[A-Za-z0-9]{6}|\.[^/]*\.sw[px]|[^/]*~|\.#[^/]*)$/;
 
 const log = (message) => console.log(`${new Date().toISOString()} ${message}`);
 let timer;
@@ -94,7 +96,9 @@ async function deploy(reason) {
 }
 
 for (const dir of WATCHED_DIRS) {
-  watch(join(root, dir), { recursive: true }, (_, file) => schedule(`${dir}/${file ?? ''}`));
+  watch(join(root, dir), { recursive: true }, (_, file) => {
+    if (!SCRATCH.test(file ?? '')) schedule(`${dir}/${file ?? ''}`);
+  });
 }
 watch(root, (_, file) => {
   if (WATCHED_FILES.has(file)) schedule(file);
