@@ -23,13 +23,14 @@ export const CATEGORIES = [
   'other',
 ] as const;
 
-export type Category = (typeof CATEGORIES)[number];
+export type Category = (typeof CATEGORIES)[number] | `custom:${string}`;
 
 export type IngredientSource = 'photo' | 'manual';
 
 export interface Ingredient {
   readonly id: number;
   readonly name: string;
+  readonly emoji: string;
   readonly category: Category;
   readonly notes: string;
   readonly source: IngredientSource;
@@ -52,7 +53,8 @@ const MAX_NAME_LENGTH = 80;
 const MAX_NOTES_LENGTH = 500;
 
 export function isCategory(value: unknown): value is Category {
-  return typeof value === 'string' && (CATEGORIES as readonly string[]).includes(value);
+  return typeof value === 'string' && ((CATEGORIES as readonly string[]).includes(value) ||
+    /^custom:[\p{L}\p{N}][\p{L}\p{N} &’'(),/-]{0,39}$/u.test(value) && value === value.trim());
 }
 
 export function cleanName(raw: unknown): string {

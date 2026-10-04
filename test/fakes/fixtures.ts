@@ -1,3 +1,5 @@
+import { IngredientClassificationService } from '../../src/application/ingredient-classification-service.ts';
+import type { IngredientClassification, IngredientClassifier } from '../../src/ports/ingredient-classifier.ts';
 import type { DatabaseSync } from 'node:sqlite';
 import { AccountService } from '../../src/application/account-service.ts';
 import { AuthService } from '../../src/application/auth-service.ts';
@@ -172,12 +174,25 @@ export function accountRepos(db: DatabaseSync) {
   };
 }
 
+export class FakeClassifier implements IngredientClassifier {
+  answer: IngredientClassification[] | Error | undefined;
+  calls = 0;
+  delayMs = 0;
+  async classify(ingredients: readonly Ingredient[]): Promise<IngredientClassification[]> {
+    this.calls++;
+    if (this.delayMs) await new Promise((done) => setTimeout(done, this.delayMs));
+    if (this.answer instanceof Error) throw this.answer;
+    return this.answer ?? ingredients.map(({ id }) => ({ id, category: 'other' }));
+  }
+}
+
 /** Feature services for one user, with fake AI. */
-export function servicesFor(db: DatabaseSync, userId: number, detector: FakeDetector, generator: FakeGenerator): AppServices {
+export function servicesFor(db: DatabaseSync, userId: number, detector: FakeDetector, generator: FakeGenerator, classifier = new FakeClassifier()): AppServices {
   const stock = new StockService(new SqliteIngredientRepository(db, userId, FIXED_NOW));
   const profile = new ProfileService(new SqliteProfileRepository(db, userId));
   return {
     stock,
+    classification: new IngredientClassificationService(classifier, stock),
     profile,
     jobs: new JobService(new SqliteJobRepository(db, userId, FIXED_NOW)),
     scan: new ScanService(detector, stock),
@@ -191,7 +206,8 @@ export function buildTestServices() {
   const user = accountRepos(db).users.create(identity());
   const detector = new FakeDetector();
   const generator = new FakeGenerator();
-  return { db, user, detector, generator, services: servicesFor(db, user.id, detector, generator) };
+  const classifier = new FakeClassifier();
+  return { db, user, detector, generator, classifier, services: servicesFor(db, user.id, detector, generator, classifier) };
 }
 
 /** Full container (real auth + accounts over SQLite, fake OpenAI and AI) for HTTP tests. */
@@ -204,6 +220,7 @@ export function buildTestContainer(
   const openai = new FakeOpenAiAuth();
   const detector = new FakeDetector();
   const generator = new FakeGenerator();
+  const classifier = new FakeClassifier();
   const catalog = new FakeCatalog();
   const auth = new AuthService({
     ...repos,
@@ -225,7 +242,7 @@ export function buildTestContainer(
   const container: AppContainer = {
     auth,
     account: new AccountService(repos.users, repos.connections, catalog),
-    forUser: (userId) => servicesFor(db, userId, detector, generator),
+    forUser: (userId) => servicesFor(db, userId, detector, generator, classifier),
   };
-  return { db, repos, openai, detector, generator, catalog, auth, container };
+  return { db, repos, openai, detector, generator, classifier, catalog, auth, container };
 }

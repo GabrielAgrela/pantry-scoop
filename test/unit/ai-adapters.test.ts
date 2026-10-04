@@ -43,6 +43,7 @@ function fakeModel(answer: unknown) {
 const stockItem = (name: string, notes = '') => ({
   id: 1,
   name,
+  emoji: '🥛',
   category: 'dairy' as const,
   notes,
   source: 'manual' as const,

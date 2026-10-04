@@ -8,6 +8,7 @@ import type { ProfileService } from '../application/profile-service.ts';
 import type { RecipeService } from '../application/recipe-service.ts';
 import type { ScanService } from '../application/scan-service.ts';
 import type { JobService } from '../application/job-service.ts';
+import type { IngredientClassificationService } from '../application/ingredient-classification-service.ts';
 import type { StockService } from '../application/stock-service.ts';
 import { AuthRequiredError, DomainError } from '../domain/errors.ts';
 import { IMAGE_LIMITS } from '../domain/image.ts';
@@ -25,6 +26,7 @@ import { loggerOptions, registerSecurity } from './security.ts';
 /** Feature services for one signed-in user. */
 export interface AppServices {
   readonly stock: StockService;
+  readonly classification: IngredientClassificationService;
   readonly scan: ScanService;
   readonly recipes: RecipeService;
   readonly profile: ProfileService;

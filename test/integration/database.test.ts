@@ -25,6 +25,39 @@ function withTempDir(run: (dir: string) => void) {
 const natas = { name: 'Natas', category: 'dairy' as const, notes: '', source: 'manual' as const };
 
 describe('openDatabase', () => {
+  it('backfills emojis for every existing owner and stock state without changing ingredient data', () => {
+    withTempDir((dir) => {
+      const path = join(dir, 'before-emojis.db');
+      const old = new DatabaseSync(path);
+      for (const migration of MIGRATIONS.slice(0, 7)) {
+        if (typeof migration === 'string') old.exec(migration);
+        else migration(old);
+      }
+      old.exec('PRAGMA user_version = 7;');
+      const users = accountRepos(old).users;
+      const alice = users.create(identity('emoji-alice'));
+      const bob = users.create(identity('emoji-bob'));
+      const insert = old.prepare('INSERT INTO ingredients (user_id, name, normalized_name, category, notes, source, in_stock, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+      insert.run(alice.id, 'Cherry tomatoes', 'cherry tomatoes', 'vegetables', 'Half a punnet', 'photo', 1, '2026-09-01');
+      insert.run(bob.id, 'Leite magro', 'leite magro', 'dairy', 'Keep chilled', 'manual', 0, '2026-09-02');
+      insert.run(null, 'Arroz', 'arroz', 'other', '', 'manual', 1, '2026-09-03');
+      const before = old.prepare('SELECT * FROM ingredients ORDER BY id').all().map((row) => ({ ...row }));
+      old.close();
+
+      const migrated = openDatabase(path);
+      const rows = migrated.prepare('SELECT * FROM ingredients ORDER BY id').all();
+      assert.deepEqual(rows.map(({ emoji, ...rest }) => rest), before);
+      assert.deepEqual(rows.map((row) => row.emoji), ['🍅', '🥛', '🍚']);
+      assert.equal(new SqliteIngredientRepository(migrated, alice.id).list().length, 1);
+      assert.equal(new SqliteIngredientRepository(migrated, bob.id).list()[0]!.inStock, false);
+      migrated.close();
+
+      const reopened = openDatabase(path);
+      assert.deepEqual(reopened.prepare('SELECT * FROM ingredients ORDER BY id').all(), rows);
+      reopened.close();
+    });
+  });
+
   it('creates the file, migrates to the latest version and keeps data across reopen', () => {
     withTempDir((dir) => {
       const path = join(dir, 'nested', 'pantry.db');

@@ -1,3 +1,5 @@
+import { IngredientClassificationService } from './application/ingredient-classification-service.ts';
+import { AiIngredientClassifier } from './infrastructure/ai/ingredient-classification.ts';
 // Composition root: the only place that knows which concrete adapters back each port.
 import type { DatabaseSync } from 'node:sqlite';
 import { AccountService } from './application/account-service.ts';
@@ -78,6 +80,7 @@ export function createContainer({ config, db, cipher, openaiAuth, responses, now
     const profile = new ProfileService(new SqliteProfileRepository(db, userId));
     return {
       stock,
+      classification: new IngredientClassificationService(new AiIngredientClassifier(model, config.chatgpt.scanEffort), stock),
       profile,
       jobs: new JobService(new SqliteJobRepository(db, userId), onJobError),
       scan: new ScanService(new AiIngredientDetector(model, config.chatgpt.scanEffort), stock),

@@ -1,4 +1,5 @@
 import { createDraft, normalizeName, type Ingredient, type IngredientDraft } from '../domain/ingredient.ts';
+import { ingredientEmoji } from '../domain/ingredient-emoji.ts';
 import { ValidationError } from '../domain/errors.ts';
 import type { ImageInput } from '../domain/image.ts';
 import type { IngredientDetector } from '../ports/ingredient-detector.ts';
@@ -12,6 +13,7 @@ export interface ScanResult {
 
 export interface ScanCandidate extends IngredientDraft {
   readonly candidateId: number;
+  readonly emoji?: string;
 }
 
 export interface ScanPreview {
@@ -54,7 +56,7 @@ export class ScanService {
         const draft = existing
           ? createDraft({ name: existing.name, category: existing.category, notes: existing.notes }, 'photo')
           : createDraft(candidate, 'photo');
-        result[existing ? 'restocked' : 'added'].push({ ...draft, candidateId: seen.size });
+        result[existing ? 'restocked' : 'added'].push({ ...draft, emoji: ingredientEmoji(draft.name, draft.category), candidateId: seen.size });
       }
     }
     return result;
@@ -86,35 +88,75 @@ export class ScanService {
   /** Validate the entire selection before any write. Edits are restricted to this scan's candidates. */
   confirm(preview: ScanPreview, selection: unknown): ScanResult {
     if (!Array.isArray(selection)) throw new ValidationError('Choose the ingredients to add.');
-    const candidates = new Map([...preview.added, ...preview.restocked].map((item) => [item.candidateId, item]));
+    // Pantry matches use the negative pantry id as their stable review identity,
+    // including saved previews created before matches could be corrected.
+    const candidates = new Map([...preview.added, ...preview.restocked,
+      ...preview.alreadyInStock.map((item) => ({ ...createDraft(item, 'photo'), candidateId: -item.id })),
+    ].map((item) => [item.candidateId, item]));
     if (selection.length > candidates.size) throw new ValidationError('Too many ingredients selected.');
     const seenIds = new Set<number>();
-    const drafts = selection.map((raw: unknown) => {
+    const known = new Map(this.stock.list().map((item) => [item.id, item]));
+    const reviewed = selection.map((raw: unknown) => {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ValidationError('Invalid ingredient selection.');
-      const input = raw as { candidateId?: unknown; name?: unknown; category?: unknown; notes?: unknown };
+      const input = raw as { candidateId?: unknown; name?: unknown; category?: unknown; notes?: unknown; duplicateIngredientId?: unknown; duplicateCandidateId?: unknown; separate?: unknown };
       if (typeof input.candidateId !== 'number' || !candidates.has(input.candidateId) || seenIds.has(input.candidateId)) {
         throw new ValidationError('Invalid ingredient selection.');
       }
       seenIds.add(input.candidateId);
       const candidate = candidates.get(input.candidateId)!;
-      return createDraft({
+      if (input.duplicateIngredientId !== undefined && input.duplicateCandidateId !== undefined) throw new ValidationError('Choose one duplicate match.');
+      if (input.duplicateIngredientId !== undefined && (typeof input.duplicateIngredientId !== 'number' || !known.has(input.duplicateIngredientId))) {
+        throw new ValidationError('That duplicate is no longer in your pantry. Choose another match.');
+      }
+      if (input.duplicateCandidateId !== undefined && (typeof input.duplicateCandidateId !== 'number' || input.duplicateCandidateId === input.candidateId)) {
+        throw new ValidationError('Invalid duplicate match.');
+      }
+      const draft = createDraft({
         name: input.name ?? candidate.name,
         category: input.category ?? candidate.category,
         notes: input.notes ?? candidate.notes,
       }, 'photo');
+      if (input.separate !== undefined && typeof input.separate !== 'boolean') throw new ValidationError('Invalid separate ingredient selection.');
+      return { candidateId: input.candidateId, draft, duplicateIngredientId: input.duplicateIngredientId as number | undefined, duplicateCandidateId: input.duplicateCandidateId as number | undefined, separate: input.separate === true };
     });
+    for (const item of reviewed) {
+      if (item.separate && item.duplicateIngredientId === undefined && item.duplicateCandidateId === undefined) {
+        const key = normalizeName(item.draft.name);
+        if ([...known.values()].some((other) => normalizeName(other.name) === key) || reviewed.some((other) => other !== item && other.duplicateIngredientId === undefined && other.duplicateCandidateId === undefined && normalizeName(other.draft.name) === key)) {
+          throw new ValidationError('Use a distinct name for the separate ingredient.');
+        }
+      }
+      if (item.duplicateCandidateId === undefined) continue;
+      const target = reviewed.find((other) => other.candidateId === item.duplicateCandidateId);
+      if (!target || target.duplicateCandidateId !== undefined || target.duplicateIngredientId !== undefined) {
+        throw new ValidationError('Keep the matched scan ingredient selected, or choose another duplicate.');
+      }
+    }
     const result: ScanResult = { added: [], restocked: [], alreadyInStock: [] };
     const seenNames = new Set<string>();
-    for (const draft of drafts) {
+    const seenIngredients = new Set<number>();
+    for (const { draft, duplicateIngredientId, duplicateCandidateId } of reviewed) {
+      // Another selected candidate owns this addition; never create the duplicate's draft.
+      if (duplicateCandidateId !== undefined) continue;
+      if (duplicateIngredientId !== undefined) {
+        if (seenIngredients.has(duplicateIngredientId)) continue;
+        const existing = known.get(duplicateIngredientId)!;
+        const confirmed = existing.inStock ? existing : this.stock.update(existing.id, { inStock: true });
+        result[existing.inStock ? 'alreadyInStock' : 'restocked'].push(confirmed);
+        seenIngredients.add(existing.id);
+        continue;
+      }
       const key = normalizeName(draft.name);
       if (seenNames.has(key)) continue;
       seenNames.add(key);
       const { ingredient, status } = this.stock.addIfMissing(draft);
+      if (seenIngredients.has(ingredient.id)) continue;
       // A reviewed restock also saves corrections made in its edit sheet.
       const confirmed = status === 'restocked'
         ? this.stock.update(ingredient.id, { name: draft.name, category: draft.category, notes: draft.notes })
         : ingredient;
       result[BUCKET[status]].push(confirmed);
+      seenIngredients.add(ingredient.id);
     }
     return result;
   }

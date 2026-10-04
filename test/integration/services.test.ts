@@ -13,6 +13,17 @@ beforeEach(() => {
 });
 
 describe('StockService', () => {
+  it('assigns emojis on add and rename, and preserves them through notes and restocking', () => {
+    const { stock } = ctx.services;
+    const milk = stock.addManual({ name: 'Leite magro' }).ingredient;
+    assert.equal(milk.emoji, '🥛');
+    assert.equal(stock.update(milk.id, { notes: 'Half left', inStock: false }).emoji, '🥛');
+    assert.equal(stock.addManual({ name: 'LEITE MAGRO' }).ingredient.emoji, '🥛');
+    assert.equal(stock.update(milk.id, { name: 'Strawberries', category: 'fruit' }).emoji, '🍓');
+    const scanned = stock.addIfMissing(createDraft({ name: 'Coco ralado' }, 'photo'));
+    assert.equal(scanned.ingredient.emoji, '🥥');
+  });
+
   it('adds an ingredient only once, whatever the spelling', () => {
     const { stock } = ctx.services;
     const first = stock.addIfMissing(createDraft({ name: 'Leite magro', category: 'dairy' }, 'photo'));

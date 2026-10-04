@@ -236,6 +236,7 @@ describe('ingredients API', () => {
     const created = await call('POST', '/api/ingredients', { name: 'Natas', category: 'dairy' });
     assert.equal(created.status, 201);
     const id = created.body.ingredient.id;
+    assert.equal(created.body.ingredient.emoji, '🥛');
 
     const listed = await call('GET', '/api/ingredients');
     assert.deepEqual(listed.body.ingredients.map((i: { name: string }) => i.name), ['Natas']);
@@ -243,6 +244,7 @@ describe('ingredients API', () => {
 
     const patched = await call('PATCH', `/api/ingredients/${id}`, { notes: 'half left' });
     assert.equal(patched.body.ingredient.notes, 'half left');
+    assert.equal(patched.body.ingredient.emoji, '🥛');
     const ranOut = await call('PATCH', `/api/ingredients/${id}`, { inStock: false });
     assert.equal(ranOut.body.ingredient.inStock, false);
     const readded = await call('POST', '/api/ingredients', { name: 'natas' });
@@ -277,6 +279,93 @@ describe('ingredients API', () => {
 });
 
 describe('scan API', () => {
+  it('lets an automatic pantry match be renamed and added separately without changing the original', async () => {
+    const call = api(await signIn());
+    const original = (await call('POST', '/api/ingredients', { name: 'Azeite', category: 'condiments', notes: 'Original bottle' })).body.ingredient;
+    ctx.detector.answer = [{ name: 'Azeite', category: 'condiments' }];
+    const job = await finished(call, (await call('POST', '/api/scan', { images: [TINY_JPEG_DATA_URL] })).body.job.id);
+    assert.equal(job.result.added.length, 0);
+    assert.equal(job.result.alreadyInStock.length, 1);
+    // Negative pantry ids also work with the already-persisted preview format.
+    const response = await call('POST', `/api/scan/${job.id}/confirm`, { ingredients: [
+      { candidateId: -original.id, name: 'Azeite Cinco Soldos', category: 'condiments', notes: 'New bottle', separate: true },
+    ] });
+    assert.equal(response.status, 200);
+    const stock = (await call('GET', '/api/ingredients')).body.ingredients;
+    assert.equal(stock.length, 2);
+    assert.deepEqual(stock.find((item: { id: number }) => item.id === original.id), original);
+    assert.equal(response.body.job.result.added[0].name, 'Azeite Cinco Soldos');
+    assert.equal(response.body.job.result.added[0].source, 'photo');
+    assert.equal(response.body.job.result.added[0].notes, 'New bottle');
+    const retry = await call('POST', `/api/scan/${job.id}/confirm`, { ingredients: [] });
+    assert.deepEqual(retry.body, response.body);
+    assert.equal((await call('GET', '/api/ingredients')).body.ingredients.length, 2);
+  });
+
+  it('requires distinct separate names and validates automatic match ids before writes', async () => {
+    const call = api(await signIn());
+    const original = (await call('POST', '/api/ingredients', { name: 'Óleo alimentar' })).body.ingredient;
+    ctx.detector.answer = [{ name: 'Óleo alimentar', category: 'condiments' }, { name: 'Tomatoes', category: 'vegetables' }];
+    const job = await finished(call, (await call('POST', '/api/scan', { images: [TINY_JPEG_DATA_URL] })).body.job.id);
+    for (const selection of [
+      [job.result.added[0], { candidateId: -original.id, name: '  oleo alimentar ', separate: true }],
+      [job.result.added[0], { candidateId: -original.id, name: 'Tomatoes', separate: true }],
+      [{ candidateId: -999, name: 'Other oil', separate: true }],
+      [{ candidateId: -original.id, name: 'Other oil', separate: 'true' }],
+    ]) {
+      assert.equal((await call('POST', `/api/scan/${job.id}/confirm`, { ingredients: selection })).status, 400);
+      assert.deepEqual((await call('GET', '/api/ingredients')).body.ingredients, [original]);
+    }
+    const done = await call('POST', `/api/scan/${job.id}/confirm`, { ingredients: [] });
+    assert.equal(done.status, 200, 'an unchanged automatic match need not be submitted');
+  });
+
+  it('matches pantry and scan duplicates without creating extras or overwriting pantry details', async () => {
+    const call = api(await signIn());
+    const milk = (await call('POST', '/api/ingredients', { name: 'Milk', category: 'dairy', notes: 'Keep this note' })).body.ingredient;
+    await call('PATCH', `/api/ingredients/${milk.id}`, { inStock: false });
+    const tomatoes = (await call('POST', '/api/ingredients', { name: 'Tomatoes', category: 'vegetables' })).body.ingredient;
+    ctx.detector.answer = [{ name: 'Whole milk', category: 'dairy' }, { name: 'Cherry tomatoes', category: 'vegetables' }, { name: 'Yogurt', category: 'dairy' }, { name: 'Greek yogurt', category: 'dairy' }];
+    const job = await finished(call, (await call('POST', '/api/scan', { images: [TINY_JPEG_DATA_URL] })).body.job.id);
+    const [a, b, c, d] = job.result.added;
+    const response = await call('POST', `/api/scan/${job.id}/confirm`, { ingredients: [
+      { ...a, duplicateIngredientId: milk.id, notes: 'Do not overwrite' },
+      { ...b, duplicateIngredientId: tomatoes.id }, { ...d, duplicateCandidateId: c.candidateId }, c,
+    ] });
+    assert.equal(response.status, 200);
+    const stock = (await call('GET', '/api/ingredients')).body.ingredients;
+    assert.deepEqual(stock.map((item: { name: string }) => item.name).sort(), ['Milk', 'Tomatoes', 'Yogurt']);
+    assert.equal(stock.find((item: { id: number }) => item.id === milk.id).notes, 'Keep this note');
+    assert.equal(stock.find((item: { id: number }) => item.id === milk.id).inStock, true);
+    assert.equal(response.body.job.result.restocked.length, 1);
+    assert.equal(response.body.job.result.alreadyInStock.length, 1);
+    assert.equal(response.body.job.result.added.length, 1);
+    await call('PATCH', `/api/ingredients/${milk.id}`, { inStock: false });
+    const retry = await call('POST', `/api/scan/${job.id}/confirm`, { ingredients: [] });
+    assert.deepEqual(retry.body, response.body);
+    assert.equal((await call('GET', '/api/ingredients')).body.ingredients.find((item: { id: number }) => item.id === milk.id).inStock, false);
+  });
+
+  it('rejects missing, foreign, self and chained duplicate targets before adding anything', async () => {
+    const call = api(await signIn('alice'));
+    const bob = api(await signIn('bob'));
+    const foreign = (await bob('POST', '/api/ingredients', { name: 'Milk' })).body.ingredient;
+    ctx.detector.answer = [{ name: 'Tomatoes', category: 'vegetables' }, { name: 'Eggs', category: 'eggs' }, { name: 'Yogurt', category: 'dairy' }];
+    const job = await finished(call, (await call('POST', '/api/scan', { images: [TINY_JPEG_DATA_URL] })).body.job.id);
+    const [a, b, c] = job.result.added;
+    for (const selection of [
+      [a, { ...b, duplicateIngredientId: foreign.id }],
+      [a, { ...b, duplicateIngredientId: '1' }],
+      [{ ...a, duplicateCandidateId: a.candidateId }],
+      [{ ...a, duplicateCandidateId: b.candidateId }],
+      [{ ...a, duplicateCandidateId: b.candidateId }, { ...b, duplicateCandidateId: c.candidateId }, c],
+      [{ ...a, duplicateIngredientId: foreign.id, duplicateCandidateId: b.candidateId }, b],
+    ]) {
+      assert.equal((await call('POST', `/api/scan/${job.id}/confirm`, { ingredients: selection })).status, 400);
+      assert.equal((await call('GET', '/api/ingredients')).body.ingredients.length, 0);
+    }
+  });
+
   it('scans in the background and keeps the result for later visits', async () => {
     const call = api(await signIn());
     ctx.detector.answer = [{ name: 'Manga', category: 'fruit' }];

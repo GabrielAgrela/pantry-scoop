@@ -66,7 +66,7 @@ export class AiIngredientDetector implements IngredientDetector {
 
 export function parseDetection(answer: unknown): DetectedIngredient[] {
   const list = (answer as { ingredients?: unknown } | null)?.ingredients;
-  if (!Array.isArray(list)) throw new AiUnavailableError('ChatGPT did not return an ingredient list.');
+  if (!Array.isArray(list)) throw new AiUnavailableError('The AI did not return an ingredient list.');
   return list.flatMap((item: unknown): DetectedIngredient[] => {
     const { name, category } = (item ?? {}) as { name?: unknown; category?: unknown };
     if (typeof name !== 'string' || name.trim() === '') return [];

@@ -1,5 +1,6 @@
 import { ConflictError, NotFoundError } from '../domain/errors.ts';
 import {
+  CATEGORIES,
   cleanChanges,
   createDraft,
   normalizeName,
@@ -27,6 +28,10 @@ export class StockService {
 
   list(): Ingredient[] {
     return this.repository.list();
+  }
+
+  categories() {
+    return [...CATEGORIES, ...new Set(this.list().map((item) => item.category).filter((id) => id.startsWith('custom:')))];
   }
 
   /** Keep a confirmed scan and its persisted outcome atomic. */

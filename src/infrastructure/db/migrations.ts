@@ -1,4 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { ingredientEmoji } from '../../domain/ingredient-emoji.ts';
+import type { Category } from '../../domain/ingredient.ts';
 import { LEGACY_PROFILE as DEFAULT_PROFILE, type Appliance, type KitchenProfile } from '../../domain/kitchen-profile.ts';
 
 export type Migration = string | ((db: DatabaseSync) => void);
@@ -135,6 +137,13 @@ export const MIGRATIONS: readonly Migration[] = [
    INSERT INTO user_identities (issuer, subject, user_id) SELECT issuer, subject, id FROM users;
    ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0;
    CREATE INDEX users_email ON users (issuer, email);`,
+  // 8 — persisted food emojis, including every existing owner's stocked and run-out ingredients.
+  (db) => {
+    db.exec("ALTER TABLE ingredients ADD COLUMN emoji TEXT NOT NULL DEFAULT '';");
+    const rows = db.prepare('SELECT id, name, category FROM ingredients').all() as unknown as { id: number; name: string; category: Category }[];
+    const update = db.prepare('UPDATE ingredients SET emoji = ? WHERE id = ?');
+    for (const row of rows) update.run(ingredientEmoji(row.name, row.category), row.id);
+  },
 ];
 
 interface LegacyProfile {

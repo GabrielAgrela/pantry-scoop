@@ -1,11 +1,12 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { ServicesOf } from '../app.ts';
-import { CATEGORIES } from '../../domain/ingredient.ts';
 import { bodyObject, idParam } from '../params.ts';
 
 export function ingredientRoutes(servicesOf: ServicesOf): FastifyPluginAsync {
   return async (app) => {
-    app.get('/', async (request) => ({ ingredients: servicesOf(request).stock.list(), categories: CATEGORIES }));
+    app.get('/', async (request) => ({ ingredients: servicesOf(request).stock.list(), categories: servicesOf(request).stock.categories() }));
+
+    app.post('/classify-other', async (request) => servicesOf(request).classification.classifyOther());
 
     app.post('/', async (request, reply) => {
       const body = bodyObject(request.body);
