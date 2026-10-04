@@ -1,0 +1,24 @@
+import { chromium } from '/home/gabi/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs';
+import {spawn} from 'node:child_process';
+import {mkdir,writeFile} from 'node:fs/promises';
+const directory=new URL('./native-trial/',import.meta.url).pathname;
+await mkdir(directory,{recursive:true});
+const browser=await chromium.launch({headless:false,executablePath:'/home/gabi/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome',env:{...process.env,DISPLAY:':92',VK_ICD_FILENAMES:'/usr/share/vulkan/icd.d/radeon_icd.x86_64.json'},args:['--use-gl=angle','--use-angle=gl','--ignore-gpu-blocklist','--kiosk','--force-device-scale-factor=2','--window-size=390,844','--disable-background-timer-throttling','--disable-renderer-backgrounding','--disable-backgrounding-occluded-windows']});
+const context=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:2,isMobile:true,hasTouch:true,colorScheme:'light',reducedMotion:'no-preference'});
+const page=await context.newPage();
+await page.goto('http://127.0.0.1:3214/demo-session');
+const welcome=page.getByRole('button',{name:'Got it',exact:true});if(await welcome.isVisible())await welcome.click();
+await page.evaluate(()=>document.fonts.ready);
+await page.waitForTimeout(1000);
+console.log('Metrics',await page.evaluate(()=>({width:innerWidth,height:innerHeight,dpr:devicePixelRatio,outerWidth,outerHeight,screenW:screen.width,screenH:screen.height})));
+await page.bringToFront();console.log('FOCUS',await page.evaluate(()=>({focused:document.hasFocus(),visibility:document.visibilityState})));const cdp=await context.newCDPSession(page);
+const win=await cdp.send('Browser.getWindowForTarget');await page.waitForTimeout(500);console.log('Bounds',await cdp.send('Browser.getWindowForTarget'));const sys=await browser.newBrowserCDPSession();const info=await sys.send('SystemInfo.getInfo');console.log('GPU',JSON.stringify({renderer:info.gpu.auxAttributes.glRenderer,backend:info.gpu.auxAttributes.displayType}));
+
+const recorder=spawn('ffmpeg',['-hide_banner','-loglevel','warning','-y','-f','x11grab','-framerate','30','-video_size','780x1688','-i',':92.0+20,190','-t','6','-c:v','libx264','-threads','2','-preset','ultrafast','-crf','16','-pix_fmt','yuv420p',directory+'native-trial.mp4'],{stdio:['pipe','inherit','inherit']});
+const finished=new Promise((resolve,reject)=>recorder.once('exit',code=>code===0?resolve():reject(new Error('ffmpeg '+code))));
+await page.evaluate(()=>{window.__raf=[];function f(t){window.__raf.push(t);requestAnimationFrame(f)}requestAnimationFrame(f)});await page.waitForTimeout(1200);
+await page.getByRole('button',{name:'Switch to dark theme',exact:true}).click();
+await page.waitForTimeout(2400);
+await page.getByRole('button',{name:'Switch to light theme',exact:true}).click();
+await finished;console.log("RAF",await page.evaluate(()=>({count:window.__raf.length,duration:window.__raf.at(-1)-window.__raf[0]})));
+await context.close();await browser.close();
