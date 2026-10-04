@@ -89,6 +89,9 @@ describe('authentication', () => {
     assert.equal(me.body.planUsageEnabled, true);
     assert.equal(me.body.showPlanWelcome, true);
     assert.equal(me.body.manageUsageUrl, 'https://chatgpt.com/settings/usage');
+    const usage = await api(session)('GET', '/api/account/usage');
+    assert.deepEqual({ used: usage.body.used, limit: usage.body.limit }, { used: 0, limit: 30 });
+    assert.match(usage.body.resetsAt, /T00:00:00\.000Z$/);
 
     await api(session)('POST', '/api/account/plan-welcome/dismiss');
     assert.equal((await api(session)('GET', '/api/account')).body.showPlanWelcome, false);

@@ -2,15 +2,18 @@ import type { FastifyPluginAsync } from 'fastify';
 import QRCode from 'qrcode';
 import type { AccountService } from '../../application/account-service.ts';
 import type { AuthService } from '../../application/auth-service.ts';
+import type { DailyAiLimit } from '../../application/daily-ai-limit.ts';
 import { ValidationError } from '../../domain/errors.ts';
 import { MANAGE_USAGE_URL } from '../../infrastructure/openai/responses-client.ts';
 import { bodyObject } from '../params.ts';
 import { COOKIES } from '../cookies.ts';
 import { phoneBaseUrl } from '../public-url.ts';
 
-export function accountRoutes(account: AccountService, auth: AuthService, publicUrl: string | undefined): FastifyPluginAsync {
+export function accountRoutes(account: AccountService, auth: AuthService, aiLimit: DailyAiLimit, publicUrl: string | undefined): FastifyPluginAsync {
   return async (app) => {
     app.get('/', async (request) => ({ ...account.view(request.userId), manageUsageUrl: MANAGE_USAGE_URL }));
+    /** Today's AI requests against the daily limit. */
+    app.get('/usage', async (request) => aiLimit.view(request.userId));
     app.get('/models', async (request) => ({ models: await account.models(request.userId) }));
     app.put('/model', async (request) => account.setModel(request.userId, bodyObject(request.body).model));
     /** QR code that signs a phone in to this account (the token travels in the URL fragment). */

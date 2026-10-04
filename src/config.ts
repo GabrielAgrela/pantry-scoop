@@ -21,6 +21,8 @@ export interface Config {
   readonly ownerEmail: string | undefined;
   /** Daily database backups kept in <data>/backups (0 = off). */
   readonly backupDays: number;
+  /** AI requests (scans, recipe batches, sorting) each person may make per UTC day (0 = unlimited). */
+  readonly dailyAiLimit: number;
   /** "Sign in with ChatGPT" website client from OpenAI; unset = open-source loopback flow. */
   readonly openai: {
     readonly clientId: string | undefined;
@@ -94,6 +96,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     allowedEmails: emailList(env.ALLOWED_EMAILS),
     ownerEmail: env.OWNER_EMAIL ? env.OWNER_EMAIL.trim().toLowerCase() : undefined,
     backupDays: env.BACKUP_DAYS === undefined || env.BACKUP_DAYS === '' ? 7 : positiveIntOrZero(env.BACKUP_DAYS, 'BACKUP_DAYS'),
+    dailyAiLimit: env.DAILY_AI_LIMIT === undefined || env.DAILY_AI_LIMIT === '' ? 30 : positiveIntOrZero(env.DAILY_AI_LIMIT, 'DAILY_AI_LIMIT'),
     openai: {
       clientId: env.OPENAI_CLIENT_ID || undefined,
       clientSecret: env.OPENAI_CLIENT_SECRET || undefined,

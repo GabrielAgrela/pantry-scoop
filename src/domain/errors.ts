@@ -7,7 +7,8 @@ export abstract class DomainError extends Error {
     | 'ai-unavailable'
     | 'auth-required'
     | 'plan-required'
-    | 'usage-limit';
+    | 'usage-limit'
+    | 'daily-limit';
 
   constructor(message: string) {
     super(message);
@@ -45,4 +46,9 @@ export class PlanUsageRequiredError extends DomainError {
 /** The user's ChatGPT plan (or this app's limit in ChatGPT settings) is used up for now. */
 export class UsageLimitError extends DomainError {
   readonly kind = 'usage-limit';
+}
+
+/** This app's own cap on AI requests per person per day is reached. */
+export class DailyLimitError extends DomainError {
+  readonly kind = 'daily-limit';
 }

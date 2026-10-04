@@ -1,7 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { LEGACY_PROFILE as DEFAULT_PROFILE, type Appliance, type KitchenProfile } from '../../domain/kitchen-profile.ts';
 import { ingredientEmoji } from '../../domain/ingredient-emoji.ts';
 import type { Category } from '../../domain/ingredient.ts';
-import { LEGACY_PROFILE as DEFAULT_PROFILE, type Appliance, type KitchenProfile } from '../../domain/kitchen-profile.ts';
 
 export type Migration = string | ((db: DatabaseSync) => void);
 
@@ -137,6 +137,7 @@ export const MIGRATIONS: readonly Migration[] = [
    INSERT INTO user_identities (issuer, subject, user_id) SELECT issuer, subject, id FROM users;
    ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0;
    CREATE INDEX users_email ON users (issuer, email);`,
+
   // 8 — persisted food emojis, including every existing owner's stocked and run-out ingredients.
   (db) => {
     db.exec("ALTER TABLE ingredients ADD COLUMN emoji TEXT NOT NULL DEFAULT '';");
@@ -163,6 +164,13 @@ export const MIGRATIONS: readonly Migration[] = [
   `ALTER TABLE users ADD COLUMN ai_provider TEXT NOT NULL DEFAULT '';`,
   // 11 — DeepSeek replaced Mistral as the alternative to a ChatGPT plan.
   `UPDATE users SET ai_provider = 'deepseek' WHERE ai_provider = 'mistral';`,
+  // 12 — AI requests per person per UTC day, for the daily limit.
+  `CREATE TABLE ai_usage (
+     user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+     day     TEXT NOT NULL,
+     count   INTEGER NOT NULL,
+     PRIMARY KEY (user_id, day)
+   );`,
 ];
 
 interface LegacyProfile {

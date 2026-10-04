@@ -9,6 +9,9 @@ import { ProfileService } from './application/profile-service.ts';
 import { RecipeService } from './application/recipe-service.ts';
 import { ScanService } from './application/scan-service.ts';
 import { JobService } from './application/job-service.ts';
+import { DailyAiLimit } from './application/daily-ai-limit.ts';
+import { LimitedModel } from './infrastructure/ai/limited-model.ts';
+import { SqliteAiUsageRepository } from './infrastructure/db/sqlite-ai-usage-repository.ts';
 import { InMemorySignInTransactionStore } from './application/sign-in-transactions.ts';
 import { StockService } from './application/stock-service.ts';
 import { APP_NAME, googleRedirectUriFor, redirectUriFor, type Config } from './config.ts';
@@ -59,6 +62,7 @@ export function createContainer({ config, db, cipher, openaiAuth, responses, goo
   const credentials = new ChatGptCredentials(connections, openaiAuth, now);
   const catalog = new CachedModelCatalog(responses, credentials, undefined, now);
   const linked = new SqliteLinkedAccountRepository(db);
+  const aiLimit = new DailyAiLimit(new SqliteAiUsageRepository(db), config.dailyAiLimit, now);
   const googleRedirectUri = googleAuth ? googleRedirectUriFor(config) : undefined;
   const connectionsService = new ConnectionsService(linked, connections, openaiAuth, {
     googleAvailable: googleRedirectUri !== undefined,
@@ -94,7 +98,11 @@ export function createContainer({ config, db, cipher, openaiAuth, responses, goo
   const forUser = (userId: number): AppServices => {
     // Their ChatGPT plan or DeepSeek, as they chose (automatic: the plan when it can be used).
     const onDeepSeek = deepseek !== undefined && connectionsService.aiProvider(userId) === 'deepseek';
-    const model = onDeepSeek ? deepseek : new ChatGptPlanModel(userId, { credentials, responses, catalog, users, defaultModel: config.chatgpt.model });
+    const model = new LimitedModel(
+      onDeepSeek ? deepseek : new ChatGptPlanModel(userId, { credentials, responses, catalog, users, defaultModel: config.chatgpt.model }),
+      aiLimit,
+      userId,
+    );
     const effort = onDeepSeek
       ? { scan: config.deepseek.scanEffort, sort: config.deepseek.sortEffort, recipe: config.deepseek.recipeEffort }
       : { scan: config.chatgpt.scanEffort, sort: config.chatgpt.scanEffort, recipe: config.chatgpt.recipeEffort };
@@ -119,6 +127,7 @@ export function createContainer({ config, db, cipher, openaiAuth, responses, goo
     auth,
     account: new AccountService(users, connections, catalog),
     connections: connectionsService,
+    aiLimit,
     forUser,
     publicUrl: config.publicUrl,
   };

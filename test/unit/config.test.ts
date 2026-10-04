@@ -10,6 +10,8 @@ describe('loadConfig access settings', () => {
     assert.equal(config.backupDays, 0);
     assert.deepEqual(loadConfig({}).allowedEmails, []);
     assert.equal(loadConfig({}).backupDays, 7);
+    assert.equal(loadConfig({}).dailyAiLimit, 30);
+    assert.equal(loadConfig({ DAILY_AI_LIMIT: '0' }).dailyAiLimit, 0);
   });
 });
 

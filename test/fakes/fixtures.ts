@@ -18,6 +18,8 @@ import type { KitchenProfile } from '../../src/domain/kitchen-profile.ts';
 import type { Recipe, SuggestionRequest } from '../../src/domain/recipe.ts';
 import type { OpenAiIdentity } from '../../src/domain/user.ts';
 import type { AppContainer, AppServices } from '../../src/http/app.ts';
+import { DailyAiLimit } from '../../src/application/daily-ai-limit.ts';
+import { SqliteAiUsageRepository } from '../../src/infrastructure/db/sqlite-ai-usage-repository.ts';
 import { openDatabase } from '../../src/infrastructure/db/database.ts';
 import {
   SqliteConnectionRepository,
@@ -299,6 +301,7 @@ export function buildTestContainer(
     auth,
     account: new AccountService(repos.users, repos.connections, catalog),
     connections,
+    aiLimit: new DailyAiLimit(new SqliteAiUsageRepository(db), 30, now),
     forUser: (userId) => servicesFor(db, userId, detector, generator, classifier),
   };
   return { db, repos, linked, openai, google: google!, detector, generator, classifier, catalog, auth, connections, container };

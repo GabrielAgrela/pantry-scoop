@@ -7,6 +7,7 @@ import type { AuthService } from '../application/auth-service.ts';
 import type { ProfileService } from '../application/profile-service.ts';
 import type { RecipeService } from '../application/recipe-service.ts';
 import type { ScanService } from '../application/scan-service.ts';
+import type { DailyAiLimit } from '../application/daily-ai-limit.ts';
 import type { JobService } from '../application/job-service.ts';
 import type { IngredientClassificationService } from '../application/ingredient-classification-service.ts';
 import type { ConnectionsService } from '../application/connections-service.ts';
@@ -43,6 +44,8 @@ export interface AppContainer {
   readonly publicUrl?: string;
   /** Linked sign-in providers and the choice of intelligence. */
   readonly connections: ConnectionsService;
+  /** Each person's daily allowance of AI requests. */
+  readonly aiLimit: DailyAiLimit;
 }
 
 export interface AppOptions {
@@ -72,6 +75,7 @@ const STATUS_BY_KIND: Record<DomainError['kind'], number> = {
   'auth-required': 401,
   'plan-required': 403,
   'usage-limit': 429,
+  'daily-limit': 429,
 };
 
 // Base64 inflates by ~4/3; leave headroom for the JSON envelope.
@@ -128,7 +132,7 @@ export async function buildApp(container: AppContainer, options: AppOptions = {}
   const strict = Math.max(5, Math.floor((options.rateLimitPerMinute ?? 300) / 5));
   await app.register(authRoutes(container.auth, strict, container.publicUrl));
   await app.register(connectionsRoutes(container.connections), { prefix: '/api/connections' });
-  await app.register(accountRoutes(container.account, container.auth, container.publicUrl), { prefix: '/api/account' });
+  await app.register(accountRoutes(container.account, container.auth, container.aiLimit, container.publicUrl), { prefix: '/api/account' });
   await app.register(ingredientRoutes(servicesOf), { prefix: '/api/ingredients' });
   await app.register(scanRoutes(servicesOf), { prefix: '/api/scan' });
   await app.register(recipeRoutes(servicesOf), { prefix: '/api/recipes' });

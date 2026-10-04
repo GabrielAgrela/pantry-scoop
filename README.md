@@ -182,6 +182,7 @@ run `loginctl enable-linger $USER` once.
 | `CHATGPT_SCAN_EFFORT` | `low` | Reasoning effort for photo recognition |
 | `CHATGPT_RECIPE_EFFORT` | `medium` | Reasoning effort for recipe suggestions |
 | `CHATGPT_TIMEOUT_MS` | `180000` | |
+| `DAILY_AI_LIMIT` | `30` | AI requests (scans, recipe batches, sorting) each person may make per day, resetting at midnight UTC; shown in the account menu. `0` = unlimited |
 
 ## Develop
 
