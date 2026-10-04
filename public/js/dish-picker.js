@@ -1,6 +1,6 @@
 import { api } from './api.js';
 import { h, openDialog, toast, withBusy } from './dom.js';
-import { field, icon } from './ui.js';
+import { dishEmoji, emoji, field, icon } from './ui.js';
 
 export const ANY_DISH = 'any';
 export const dishLabel = (kind) => (kind === ANY_DISH ? 'Any dish' : kind);
@@ -34,6 +34,7 @@ export function createDishPicker({ getValue, onChange, getDishTypes, setDishType
       const row = (value, details, editable) => h('div', { class: 'dish-row' },
         h('button', { type: 'button', class: 'dish-option', 'aria-pressed': String(current === value), 'data-name': value, onclick: () => choose(value) },
           h('span', { class: 'dish-mark', 'aria-hidden': 'true' }, current === value ? icon('check') : ''),
+          emoji(dishEmoji(value), 'dish-emoji'),
           h('span', { class: 'dish-copy' }, h('strong', {}, dishLabel(value)), details ? h('small', {}, details) : '')),
         editable ? h('button', { type: 'button', class: 'icon dish-edit', 'aria-label': `Edit ${value}`, onclick: () => showForm(value) }, icon('edit')) : '');
       const addButton = h('button', { type: 'button', class: 'add-row dish-add', onclick: () => showForm() }, icon('plus'), 'New dish type');

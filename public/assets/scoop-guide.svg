@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="170" viewBox="0 0 160 170" fill="none">
+  <style>
+    .eyes { transform-origin: 80px 98px; animation: blink 5.5s infinite; }
+    .wave { transform-origin: 121px 106px; animation: wave 7s ease-in-out infinite; }
+    @keyframes blink { 0%, 43%, 47%, 100% { transform: scaleY(1); } 45% { transform: scaleY(.12); } }
+    @keyframes wave { 0%, 76%, 100% { transform: rotate(0); } 82% { transform: rotate(-14deg); } 90% { transform: rotate(12deg); } 96% { transform: rotate(-8deg); } }
+    @media (prefers-reduced-motion: reduce) { .eyes, .wave { animation: none; } }
+  </style>
+  <ellipse cx="80" cy="159" rx="34" ry="5" fill="#b96c89" opacity=".14"/>
+  <path d="M40 107c-14 3-17-6-17-12" stroke="#925569" stroke-width="5" stroke-linecap="round"/>
+  <g class="wave">
+    <path d="M120 109c12-1 17-9 17-16" stroke="#925569" stroke-width="5" stroke-linecap="round"/>
+    <path d="m129 69 9 34" stroke="#bd955e" stroke-width="6" stroke-linecap="round"/>
+    <ellipse cx="126" cy="60" rx="10" ry="14" transform="rotate(-15 126 60)" fill="#fff1d7" stroke="#925569" stroke-width="2.5"/>
+    <path d="M136 92c-4-3-9 0-7 4" stroke="#925569" stroke-width="4" stroke-linecap="round"/>
+  </g>
+  <path d="m60 143-3 9m45-9 3 9" stroke="#925569" stroke-width="6" stroke-linecap="round"/>
+  <rect x="35" y="61" width="90" height="86" rx="29" fill="#fff1d7" stroke="#925569" stroke-width="2.5"/>
+  <path d="M37 88c22-9 64-9 86 0v28c0 18-12 29-30 29H66c-18 0-29-11-29-29V88Z" fill="#f7b8cb"/>
+  <path d="M44 56h72v16H44z" fill="#eba6b7" stroke="#925569" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M53 61h54" stroke="#fff9ee" stroke-width="3" stroke-linecap="round"/>
+  <path d="M47 56V41c-13-2-17-18-7-26 8-7 19-4 23 2 6-17 27-17 34-1 13-9 32 4 28 18-2 7-8 11-13 11v11H47Z" fill="#fffdf5" stroke="#925569" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M59 40v14m20-16v16m21-14v14" stroke="#eedde1" stroke-width="3" stroke-linecap="round"/>
+  <ellipse cx="51" cy="113" rx="10" ry="6" fill="#e88caa"/><ellipse cx="109" cy="113" rx="10" ry="6" fill="#e88caa"/>
+  <g class="eyes">
+    <ellipse cx="62" cy="98" rx="6" ry="8" fill="#664252"/><ellipse cx="98" cy="98" rx="6" ry="8" fill="#664252"/>
+    <circle cx="64" cy="95" r="2.4" fill="#fffdf5"/><circle cx="100" cy="95" r="2.4" fill="#fffdf5"/>
+    <circle cx="60" cy="101" r="1.2" fill="#fffdf5"/><circle cx="96" cy="101" r="1.2" fill="#fffdf5"/>
+  </g>
+  <path d="M73 112c2 8 12 8 14 0" stroke="#734853" stroke-width="3" stroke-linecap="round"/>
+  <path d="M78 138c-13-7-15-14-8-17 5-2 8 3 8 3s4-5 9-2c7 5-1 12-9 16Z" fill="#b85579"/>
+  <path d="m20 56 3-6 3 6 6 3-6 3-3 6-3-6-6-3 6-3Z" fill="#e0b260"/>
+  <path d="M139 33c-9-5-12-11-7-13 3-2 6 1 6 1s2-3 5-1c5 3 2 8-4 13Z" fill="#e9a4b7"/>
+</svg>

@@ -1,12 +1,13 @@
 import { api } from './api.js';
-import { h, MANAGE_USAGE_URL, openDialog, showError, toast } from './dom.js';
-import { icon } from './ui.js';
+import { blobBuddy, feel } from './blob-buddy.js';
+import { calmMotion, h, MANAGE_USAGE_URL, openDialog, showError, toast } from './dom.js';
+import { icon, pantryFriend } from './ui.js';
 
 const manageUsageLink = (label = 'Manage usage') =>
   h('a', { href: MANAGE_USAGE_URL, target: '_blank', rel: 'noopener' }, label);
 
-/** Header account menu: who is signed in, ChatGPT plan status, model choice, sign out. */
-export function renderAccount(root, account, { mode, onSignedOut, onEnablePlan }) {
+/** Header account menu: who is signed in, ChatGPT plan and model, then account actions. */
+export function renderAccount(root, account, { mode, onSignedOut, onEnablePlan, onRestoreDefaults }) {
   const { user, planUsageEnabled } = account;
   const model = h('select', { 'aria-label': 'AI model', onchange: async () => {
     try {
@@ -18,43 +19,177 @@ export function renderAccount(root, account, { mode, onSignedOut, onEnablePlan }
   } }, h('option', { value: '' }, 'Automatic'));
   if (planUsageEnabled) loadModels(model, user.model);
 
-  const signOut = h('button', { onclick: async () => {
+  const signOut = async () => {
     const result = await api.signOut().catch(() => ({ revoked: false }));
     if (!result.revoked) toast('Signed out. If you want to fully disconnect, remove Pantry Scoop in ChatGPT settings.');
     onSignedOut();
-  } }, 'Sign out');
+  };
+  const deleteAccount = async () => {
+    if (!confirm('Delete your account and everything in it? This can’t be undone.')) return;
+    try {
+      await api.deleteAccount();
+      onSignedOut();
+    } catch (error) {
+      showError(error);
+    }
+  };
+  const item = (symbol, label, onclick) => h('button', { class: 'menu-item', onclick }, icon(symbol), label);
+
+  // Which intelligence runs scans and recipes, and which providers this account signs in with.
+  const aiSection = h('div', { class: 'menu-section', 'aria-busy': 'true' });
+  const linkSection = h('div', { class: 'menu-section linked-accounts', hidden: true });
+  const planRows = () => [
+    h('div', { class: 'plan' }, icon('check'), h('span', {}, 'Using your ChatGPT plan'),
+      h('a', { href: MANAGE_USAGE_URL, target: '_blank', rel: 'noopener', 'aria-label': 'Manage usage in ChatGPT' }, 'Usage', icon('external'))),
+    h('label', { class: 'model-field' }, h('span', {}, 'AI model'), model),
+  ];
+  const disconnect = async (provider, name) => {
+    if (!confirm(`Disconnect ${name} from this account? You can connect it again later.`)) return;
+    try {
+      await api.disconnect(provider);
+      location.reload();
+    } catch (error) {
+      showError(error);
+    }
+  };
+  const providerRow = (name, connected, connect, provider) =>
+    h('div', { class: 'provider-row' },
+      h('span', { class: connected ? 'provider on' : 'provider' }, connected ? icon('check') : '', name),
+      connected
+        ? h('button', { class: 'link-button', onclick: () => disconnect(provider, name) }, 'Disconnect')
+        : h('button', { class: 'link-button', onclick: connect }, 'Connect'));
+  const fillConnections = async () => {
+    let view;
+    try {
+      view = await api.getConnections();
+    } catch {
+      aiSection.replaceChildren(...(planUsageEnabled ? planRows() : [enablePlanPrompt(onEnablePlan)]));
+      return;
+    }
+    aiSection.removeAttribute('aria-busy');
+    document.body.dataset.ai = view.aiProvider;
+    window.dispatchEvent(new CustomEvent('pantry:ai-changed'));
+    const usingPlan = view.aiProvider === 'chatgpt';
+    const choice = h('select', { 'aria-label': 'Intelligence', onchange: async () => {
+      try {
+        const next = await api.setAi(choice.value);
+        toast(next.aiProvider === 'deepseek' ? 'Scans and recipes now use DeepSeek' : 'Scans and recipes now use ChatGPT');
+        fillConnections();
+      } catch (error) {
+        showError(error);
+        choice.value = view.aiProvider;
+      }
+    } }, h('option', { value: 'chatgpt' }, 'ChatGPT plan'), h('option', { value: 'deepseek' }, 'DeepSeek'));
+    choice.value = view.aiProvider;
+    aiSection.replaceChildren(
+      view.deepseekAvailable ? h('label', { class: 'model-field' }, h('span', {}, 'Intelligence'), choice) : '',
+      ...(usingPlan
+        ? view.chatgptPlan ? planRows() : [enablePlanPrompt(onEnablePlan)]
+        : [h('div', { class: 'plan' }, icon('check'), h('span', {}, 'Using DeepSeek'))]),
+    );
+    linkSection.replaceChildren(
+      h('span', { class: 'muted menu-label' }, 'Sign in with'),
+      providerRow('ChatGPT', view.chatgpt, onEnablePlan, 'chatgpt'),
+      view.googleAvailable || view.google ? providerRow('Google', view.google, () => { location.href = '/auth/google/start'; }, 'google') : '',
+    );
+    linkSection.hidden = false;
+  };
+  fillConnections();
+  // Some sign-ins only carry an email, which then arrives as the name too.
+  const name = user.name && user.name !== user.email ? user.name : '';
+  // Today's AI requests left, refreshed each time the menu opens; a failed lookup hides it.
+  const usageCount = h('span');
+  const usage = h('span', { class: 'chip ai-usage', hidden: true }, icon('spark'), usageCount);
+  const showUsage = async () => {
+    try {
+      const { used, limit, resetsAt } = await api.getAiUsage();
+      const left = Math.max(0, limit - used);
+      usage.hidden = limit === 0;
+      usage.classList.toggle('warn', left === 0);
+      usageCount.textContent = `${left}/${limit} AI requests left today`;
+      const resets = new Date(resetsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      usage.title = `Scans, recipe ideas and sorting each use one. Resets at ${resets}.`;
+    } catch { usage.hidden = true; }
+  };
+  void showUsage();
+
+  // The same blob twice: a small one in the header and a big one in the menu that watches the pointer.
+  const seed = user.email || user.name || '?';
+  const says = h('span', { class: 'blob-says', 'aria-hidden': 'true' });
+  const buddy = blobBuddy(seed, { className: 'blob-big', speech: says, crop: 6 });
 
   const menu = h('details', { class: 'account-menu' },
       h('summary', { 'aria-label': 'Account' },
-        user.picture ? h('img', { src: user.picture, alt: '', class: 'avatar', referrerpolicy: 'no-referrer' }) : h('span', { class: 'avatar' }, initials(user)),
+        blobBuddy(seed, { className: 'avatar', crop: 13 }).el,
       ),
-      h('div', { class: 'card stack menu' },
-        h('strong', {}, user.name || user.email),
-        user.name ? h('span', { class: 'muted' }, user.email) : '',
-        planUsageEnabled
-          ? h('div', { class: 'plan' }, h('span', { class: 'chip ok' }, 'Using ChatGPT plan'), manageUsageLink())
-          : enablePlanPrompt(onEnablePlan),
-        planUsageEnabled ? h('label', {}, 'AI model', model) : '',
-        // Only needed when ChatGPT can't send phones back here (open-source loopback flow).
-        mode === 'local' ? h('button', { onclick: showPhoneQr }, icon('pantry'), 'Sign in on your phone') : '',
-        signOut,
-        h('button', { class: 'danger link', onclick: async () => {
-          if (!confirm('Delete your account and everything in it? This can’t be undone.')) return;
-          try {
-            await api.deleteAccount();
-            onSignedOut();
-          } catch (error) {
-            showError(error);
-          }
-        } }, 'Delete account'),
+      h('div', { class: 'card menu' },
+        h('div', { class: 'menu-section account-who' },
+          h('button', { type: 'button', class: 'blob-stage', 'aria-label': 'Poke your blob buddy', onclick: () => buddy.poke() }, buddy.el, says),
+          h('strong', {}, name || user.email),
+          name ? h('span', { class: 'muted' }, user.email) : '',
+          usage),
+        aiSection,
+        linkSection,
+        h('div', { class: 'menu-section menu-items' },
+          // Only needed when ChatGPT can't send phones back here (open-source loopback flow).
+          mode === 'local' ? item('phone', 'Sign in on your phone', showPhoneQr) : '',
+          item('reset', 'Restart kitchen setup', onRestoreDefaults),
+          item('signout', 'Sign out', signOut),
+          h('button', { class: 'menu-item danger', onclick: deleteAccount }, icon('trash'), 'Delete account')),
       ),
     );
+  // Opening is the fold played backwards: the avatar nods and the card springs out of it.
+  // Closing folds the card back up into the avatar, which gives a little nod as it lands.
+  let folding;
+  let unfolding;
+  const openMenu = () => {
+    menu.open = true;
+    void showUsage();
+    buddy.follow(true);
+    feel('happy', 1200);
+    const panel = menu.querySelector('.menu');
+    if (calmMotion(panel)) return;
+    menu.querySelector('.avatar')?.animate([{ transform: 'none' }, { transform: 'scale(.9) rotate(6deg)', offset: 0.4 }, { transform: 'none' }], { duration: 260, easing: 'ease-out' });
+    unfolding = panel.animate([
+      { transform: 'translate(6px, -14px) scale(.35) rotate(6deg)', opacity: 0, easing: 'cubic-bezier(.2, .8, .3, 1)' },
+      { transform: 'translateY(2px) scale(1.02, .98)', opacity: 1, offset: 0.7, easing: 'ease-out' },
+      { transform: 'none', opacity: 1 },
+    ], { duration: 300 });
+    unfolding.onfinish = () => { unfolding = undefined; };
+  };
+  const closeMenu = () => {
+    if (!menu.open || folding) return;
+    buddy.follow(false);
+    unfolding?.cancel();
+    unfolding = undefined;
+    const panel = menu.querySelector('.menu');
+    if (calmMotion(panel)) { menu.open = false; return; }
+    menu.classList.add('is-closing');
+    folding = panel.animate([
+      { transform: 'none', opacity: 1, easing: 'cubic-bezier(.3, 0, .5, 1)' },
+      { transform: 'translateY(3px) scale(1.02, .97)', opacity: 1, offset: 0.2, easing: 'cubic-bezier(.55, 0, .85, .4)' },
+      { transform: 'translate(6px, -14px) scale(.35) rotate(6deg)', opacity: 0 },
+    ], { duration: 260, fill: 'forwards' });
+    folding.onfinish = () => {
+      menu.open = false;
+      menu.classList.remove('is-closing');
+      folding.cancel();
+      folding = undefined;
+      menu.querySelector('.avatar')?.animate([{ transform: 'none' }, { transform: 'scale(.88) rotate(-8deg)', offset: 0.35 }, { transform: 'scale(1.06) rotate(4deg)', offset: 0.7 }, { transform: 'none' }], { duration: 380, easing: 'ease-out' });
+    };
+  };
+  menu.querySelector(':scope > summary').addEventListener('click', (event) => {
+    event.preventDefault();
+    if (!menu.open) openMenu();
+    else if (folding) { folding.onfinish = null; folding.cancel(); folding = undefined; menu.classList.remove('is-closing'); buddy.follow(true); } // tapped again: stay open
+    else closeMenu();
+  });
   // Close after choosing something, and when tapping anywhere else.
   menu.addEventListener('click', (event) => {
-    if (event.target.closest('.menu button')) menu.open = false;
+    if (event.target.closest('.menu button:not(.blob-stage)')) closeMenu();
   });
   document.addEventListener('click', (event) => {
-    if (menu.open && !menu.contains(event.target)) menu.open = false;
+    if (menu.open && !menu.contains(event.target)) closeMenu();
   });
   root.replaceChildren(menu);
 }
@@ -70,6 +205,7 @@ function enablePlanPrompt(onEnable) {
 /** One-time confirmation after the first sign-in with plan usage (per OpenAI's UX guidelines). */
 export function showPlanWelcome() {
   const { close } = openDialog('welcome',
+    pantryFriend('welcome-friend'),
     h('h3', {}, 'You’re using your ChatGPT plan'),
     h('p', {}, manageUsageLink('Manage usage'), ' in ChatGPT settings.'),
     h('button', { class: 'primary', onclick: () => {
@@ -103,8 +239,4 @@ async function loadModels(select, current) {
   } catch {
     // The menu still works without the list; "Automatic" remains available.
   }
-}
-
-function initials(user) {
-  return (user.name || user.email || '?').trim().slice(0, 1).toUpperCase();
 }

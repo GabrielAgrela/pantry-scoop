@@ -1,4 +1,5 @@
 import { api } from './api.js';
+import { jobForgotten, jobUpdate } from './blob-buddy.js';
 
 const POLL_MS = 1500;
 
@@ -15,20 +16,23 @@ export async function latestJob(kind) {
 export function watchJob(job, onUpdate) {
   let stopped = false;
   let timer;
+  let latest = job;
+  const update = (current) => { latest = current; jobUpdate(current); onUpdate(current); };
   const tick = async () => {
     if (stopped) return;
     try {
       const { job: current } = await api.getJob(job.id);
-      onUpdate(current);
+      update(current);
       if (current.status === 'running') timer = setTimeout(tick, POLL_MS);
     } catch {
       timer = setTimeout(tick, POLL_MS * 2); // network blip: keep trying
     }
   };
-  onUpdate(job);
+  update(job);
   if (job.status === 'running') timer = setTimeout(tick, POLL_MS);
   return () => {
     stopped = true;
     clearTimeout(timer);
+    jobForgotten(latest);
   };
 }

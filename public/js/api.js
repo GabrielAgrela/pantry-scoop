@@ -13,11 +13,12 @@ export const SIGNED_OUT_EVENT = 'pantry:signed-out';
 export const PANTRY_CHANGED_EVENT = 'pantry:stock-changed';
 
 /** Single place that knows the HTTP API's shape. */
-async function request(method, url, body) {
+async function request(method, url, body, { keepalive = false } = {}) {
   const response = await fetch(url, {
     method,
     headers: body === undefined ? {} : { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
+    keepalive,
   });
   const notifyStockChange = () => {
     if (response.ok && method !== 'GET' && (url.startsWith('/api/ingredients') || /^\/api\/scan\/\d+\/confirm$/.test(url))) window.dispatchEvent(new CustomEvent(PANTRY_CHANGED_EVENT));
@@ -40,6 +41,7 @@ export const api = {
   getAuthConfig: () => request('GET', '/api/auth/config'),
   getAccount: () => request('GET', '/api/account'),
   listModels: () => request('GET', '/api/account/models'),
+  getAiUsage: () => request('GET', '/api/account/usage'),
   setModel: (model) => request('PUT', '/api/account/model', { model }),
   dismissPlanWelcome: () => request('POST', '/api/account/plan-welcome/dismiss'),
   completeSignIn: (callbackUrl) => request('POST', '/api/auth/complete', { callbackUrl }),
@@ -47,7 +49,11 @@ export const api = {
   signInWithDeviceLink: (token) => request('POST', '/api/auth/device-link', { token }),
   signOut: () => request('POST', '/api/auth/sign-out'),
   deleteAccount: () => request('DELETE', '/api/account'),
+  getConnections: () => request('GET', '/api/connections'),
+  setAi: (provider) => request('PUT', '/api/connections/ai', { provider }),
+  disconnect: (provider) => request('POST', '/api/connections/disconnect', { provider }),
 
+  classifyOther: () => request('POST', '/api/ingredients/classify-other', {}),
   listIngredients: () => request('GET', '/api/ingredients'),
   addIngredient: (ingredient) => request('POST', '/api/ingredients', ingredient),
   updateIngredient: (id, changes) => request('PATCH', `/api/ingredients/${id}`, changes),
@@ -64,6 +70,6 @@ export const api = {
   deleteSavedRecipe: (id) => request('DELETE', `/api/recipes/saved/${id}`),
 
   getProfile: () => request('GET', '/api/profile'),
-  updateProfile: (profile) => request('PUT', '/api/profile', profile),
+  updateProfile: (profile, options) => request('PUT', '/api/profile', profile, options),
   resetProfile: () => request('POST', '/api/profile/reset'),
 };

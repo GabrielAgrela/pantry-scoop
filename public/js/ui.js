@@ -1,6 +1,10 @@
 import { h } from './dom.js';
 
 const paths = {
+  sort: ['M8 4v16', 'm4 8 4-4 4 4', 'M16 4v16', 'm12 16 4 4 4-4'],
+  unlink: ['M9 15l-2 2a4 4 0 0 1-6-6l2-2', 'm15 9 2-2a4 4 0 0 1 6 6l-2 2', 'M8 2v3', 'M2 8h3', 'M16 19v3', 'M19 16h3', 'm10 14 4-4'],
+  trash: ['M3 6h18', 'M9 6V3h6v3', 'm5 6 1 15h12l1-15', 'M10 10v7', 'M14 10v7'],
+  link: ['m10 13 4-4', 'M8 15l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0', 'm16 9 1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0'],
   edit: ['m16 3 5 5-12 12-6 1 1-6Z', 'm14 5 5 5'],
   chevron: ['m9 5 7 7-7 7'],
   back: ['m15 5-7 7 7 7'],
@@ -23,9 +27,13 @@ const paths = {
   check: ['m5 12 4 4L19 6'],
   close: ['m6 6 12 12', 'M18 6 6 18'],
   clock: ['M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z', 'M12 7v5l3 2'],
-  bookmark: ['M6 3h12v18l-6-4-6 4Z'],
+  bookmark: ['M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z'],
   bowl: ['M3 11h18c0 6-4 9-9 9s-9-3-9-9Z', 'M8 3v4', 'M12 2v5', 'M16 3v4'],
   settings: ['M4 7h16', 'M4 17h16', 'M8 4v6', 'M16 14v6'],
+  phone: ['M7 2h10v20H7Z', 'M11 18h2'],
+  reset: ['M3 12a9 9 0 1 0 3-6.7', 'M3 4v5h5'],
+  signout: ['M14 4h6v16h-6', 'M10 12h10', 'm7 8-4 4 4 4'],
+  external: ['M14 4h6v6', 'M20 4l-9 9', 'M18 14v6H4V6h6'],
 };
 
 /** Small, local vector icons; user content is always rendered with the text-safe builder. */
@@ -41,3 +49,37 @@ export function icon(name, className = '') {
 }
 
 export const field = (label, input, hint) => h('label', { class: 'field' }, h('span', {}, label), input, hint ? h('small', {}, hint) : '');
+
+/** Decorative accents stay out of screen reader labels. */
+export const emoji = (symbol, className = '') => h('span', { class: `emoji ${className}`, 'aria-hidden': 'true' }, symbol);
+
+/** A small illustrated pantry friend; all decoration is hidden from assistive tech. */
+export const pantryFriend = (className = '') => h('span', { class: `pantry-friend ${className}`, 'aria-hidden': 'true' }, h('img', { src: '/assets/scoop-jar.svg', alt: '', width: 96, height: 112 }));
+
+/** Scoop, the guide, saying something in a speech bubble; only the words reach assistive tech. */
+export const scoopSays = (content, className = '') => h('div', { class: `scoop-says ${className}`.trim() },
+  h('img', { class: 'scoop-says-face', src: '/assets/scoop-guide.svg', alt: '', width: 56, height: 60, 'aria-hidden': 'true' }),
+  h('p', { class: 'scoop-says-bubble' }, content));
+
+export const emptyState = (symbol, title, copy) => h('div', { class: 'empty-state' },
+  h('div', { class: 'empty-art', 'aria-hidden': 'true' }, pantryFriend(), emoji(symbol, 'empty-companion')),
+  h('h3', {}, title), h('p', {}, copy));
+
+export function dishEmoji(value) {
+  const name = value.toLowerCase();
+  for (const [pattern, symbol] of [[/ice.?cream|gelado|sorbet/, '🍨'], [/cake|baking|bake|bolo|muffin/, '🧁'], [/cookie|biscuit/, '🍪'], [/pasta|spaghetti|massa|noodle/, '🍝'], [/salad|salada/, '🥗'], [/soup|sopa|stew/, '🍲'], [/egg|breakfast|frittata|omelette|ovo/, '🍳'], [/dessert|chocolate|brownie|sobremesa/, '🍰'], [/drink|smoothie|sumo/, '🥤'], [/bread|toast|sandwich|pao/, '🥪'], [/pizza/, '🍕'], [/snack/, '🥨']]) {
+    if (pattern.test(name)) return symbol;
+  }
+  return '🍽️';
+}
+
+export function applianceEmoji(name) {
+  if (/ice.?cream|gelado/i.test(name)) return '🍨';
+  if (/freez|frigor|fridge/i.test(name)) return '🧊';
+  if (/blend|liquid/i.test(name)) return '🥤';
+  if (/oven|forno|fryer/i.test(name)) return '🥐';
+  if (/microwave/i.test(name)) return '🍱';
+  if (/hob|stove|fogao/i.test(name)) return '🍳';
+  if (/kettle|tea/i.test(name)) return '🫖';
+  return '🥣';
+}

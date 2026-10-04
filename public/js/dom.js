@@ -1,3 +1,5 @@
+import { feel } from './blob-buddy.js';
+
 /**
  * Tiny element builder. Text is always inserted as text nodes, never parsed as HTML,
  * so ingredient names coming from photos or the AI cannot inject markup.
@@ -20,16 +22,22 @@ export function h(tag, attrs = {}, ...children) {
 
 let toastTimer;
 let dialogSequence = 0;
+let lastPress;
+document.addEventListener('pointerdown', (event) => {
+  const el = event.target?.closest?.('button, a, summary, [role="button"]');
+  if (el) lastPress = { el, at: Date.now() };
+}, { capture: true, passive: true });
 
 export const MANAGE_USAGE_URL = 'https://chatgpt.com/settings/usage';
 
-export function toast(message, { error = false, action } = {}) {
+export function toast(message, { error = false, action, mood } = {}) {
   const el = document.getElementById('toast');
-  el.replaceChildren(message, action ? h('a', { class: 'toast-action', href: action.href, target: '_blank', rel: 'noopener' }, action.label) : '');
+  el.replaceChildren(error ? '' : h('span', { class: 'toast-sparkle', 'aria-hidden': 'true' }, '✦'), message, action ? h('a', { class: 'toast-action', href: action.href, target: '_blank', rel: 'noopener' }, action.label) : '');
   el.classList.toggle('error', error);
   el.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => (el.hidden = true), action ? 12000 : error ? 6000 : 3500);
+  feel(mood ?? (error ? 'sad' : 'happy'));
 }
 
 /** Shows an API error; a usage limit gets "Manage usage" as its primary action. */
@@ -55,23 +63,114 @@ export async function withBusy(button, busyLabel, action) {
   }
 }
 
-/** Modal dialog that removes itself when closed. Returns { dialog, close }. */
+/** True when animations should be skipped (reduced motion, or no Web Animations support). */
+export function calmMotion(el = document.body) {
+  return !el.animate || !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+}
+
+/**
+ * Modal dialog that removes itself when closed. Returns { dialog, close }. Closing tucks the sheet
+ * back into whatever opened it (the recipe card, the appliance tile, the Add button), which gives a
+ * little boop and sparkle as it lands; with nothing to return to, the sheet drops gently away.
+ */
 export function openDialog(className, ...content) {
+  // Safari does not focus tapped buttons, so the last press stands in for the focused element.
+  const pressed = lastPress && Date.now() - lastPress.at < 1500 && lastPress.el.isConnected ? lastPress.el : undefined;
+  const focused = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : undefined;
+  const source = pressed ?? focused;
+  const opener = source ? openerKey(source) : undefined;
   const dialog = h('dialog', { class: `card stack ${className}` }, ...content);
   const heading = dialog.querySelector('h3, h2');
   if (heading) {
+    if (!className.includes('recipe-detail')) {
+      const symbol = className.includes('scan') ? '📷' : className.includes('qr') ? '📱' : className.includes('dish') ? '🍽️' : className.includes('welcome') ? '🫶' : className.includes('sort') ? '🧺' : className.includes('tips') ? '💡' : '✨';
+      // Tips come from Scoop, so he signs them himself instead of a lightbulb stamp.
+      heading.prepend(className.includes('tips')
+        ? h('img', { class: 'dialog-stamp scoop-stamp', src: '/assets/scoop-guide.svg', alt: '', width: 52, height: 55, 'aria-hidden': 'true' })
+        : h('span', { class: 'dialog-stamp', 'aria-hidden': 'true' }, symbol));
+    }
     heading.id = `dialog-title-${++dialogSequence}`;
     dialog.setAttribute('aria-labelledby', heading.id);
   }
-  const close = () => {
+  let closing = false;
+  const finish = () => {
+    if (!dialog.isConnected) return;
     dialog.close();
     dialog.remove();
   };
-  dialog.addEventListener('cancel', close);
+  const close = () => {
+    if (closing) return;
+    closing = true;
+    if (calmMotion(dialog) || !dialog.open) return finish();
+    dialog.inert = true; // a second tap during the goodbye does nothing
+    dialog.classList.add('is-closing');
+    const target = findOpener(opener, dialog);
+    const animation = target ? tuckInto(dialog, target) : dropAway(dialog);
+    animation.onfinish = () => { finish(); if (target) landed(target); };
+    setTimeout(finish, 900); // never leave an invisible modal behind
+  };
+  dialog.addEventListener('cancel', (event) => { event.preventDefault(); close(); });
+  dialog.addEventListener('close', finish); // the browser may still force a close past `cancel`
   dialog.addEventListener('click', (event) => {
     if (event.target === dialog) close(); // tap outside
   });
   document.body.append(dialog);
   dialog.showModal();
   return { dialog, close };
+}
+
+/**
+ * Remembers what opened a dialog. Views often re-render while a sheet is open (saving a recipe
+ * rebuilds its card), so the element is found again by its class and label when it was replaced.
+ */
+function openerKey(el) {
+  return { el, tag: el.tagName, className: el.className, label: el.getAttribute('aria-label') ?? el.textContent.trim() };
+}
+
+function findOpener(key, dialog) {
+  if (!key) return undefined;
+  const same = (el) => el.className === key.className && (el.getAttribute('aria-label') ?? el.textContent.trim()) === key.label;
+  const el = key.el.isConnected ? key.el : [...document.querySelectorAll(key.tag)].find(same);
+  if (!el || dialog.contains(el) || el.closest('dialog.is-closing')) return undefined;
+  const box = el.getBoundingClientRect();
+  const onScreen = box.width > 0 && box.height > 0 && box.bottom > 0 && box.top < window.innerHeight && box.right > 0 && box.left < window.innerWidth;
+  return onScreen ? el : undefined;
+}
+
+/** A small inhale, then the sheet shrinks and swoops into the element that opened it. */
+function tuckInto(dialog, target) {
+  const from = dialog.getBoundingClientRect(), to = target.getBoundingClientRect();
+  const dx = to.left + to.width / 2 - (from.left + from.width / 2);
+  const dy = to.top + to.height / 2 - (from.top + from.height / 2);
+  const scale = Math.min(0.5, Math.max(0.06, to.width / from.width));
+  const tilt = dx < 0 ? 4 : -4;
+  return dialog.animate([
+    { transform: 'none', opacity: 1, easing: 'cubic-bezier(.3, 0, .5, 1)' },
+    { transform: 'translateY(-8px) scale(1.025, .975)', opacity: 1, offset: 0.18, easing: 'cubic-bezier(.55, 0, .8, .4)' },
+    { transform: `translate(${dx * 0.9}px, ${dy * 0.9}px) scale(${scale * 1.25}) rotate(${tilt}deg)`, opacity: 0.85, offset: 0.82 },
+    { transform: `translate(${dx}px, ${dy}px) scale(${scale}) rotate(0deg)`, opacity: 0 },
+  ], { duration: 460, fill: 'forwards' });
+}
+
+/** Nothing to return to: the sheet hops up, then settles down and out of sight. */
+function dropAway(dialog) {
+  return dialog.animate([
+    { transform: 'none', opacity: 1, easing: 'cubic-bezier(.3, 0, .5, 1)' },
+    { transform: 'translateY(-8px) scale(1.02, .98)', opacity: 1, offset: 0.22, easing: 'cubic-bezier(.5, 0, .9, .5)' },
+    { transform: 'translateY(48px) scale(.9) rotate(1.5deg)', opacity: 0 },
+  ], { duration: 340, fill: 'forwards' });
+}
+
+/** The opener catches the sheet: a squishy boop and a few sparkles. */
+function landed(target) {
+  if (!target.isConnected) return;
+  target.animate([
+    { transform: 'none' }, { transform: 'scale(.92, 1.06)', offset: 0.3 }, { transform: 'scale(1.05, .96)', offset: 0.65 }, { transform: 'none' },
+  ], { duration: 420, easing: 'ease-out' });
+  const box = target.getBoundingClientRect();
+  const puff = h('span', { class: 'tuck-puff', 'aria-hidden': 'true' }, h('span', {}, '✦'), h('span', {}, '✧'), h('span', {}, '✦'));
+  puff.style.left = `${box.left + box.width / 2}px`; // CSSOM, since the CSP refuses style attributes
+  puff.style.top = `${box.top + box.height / 2}px`;
+  document.body.append(puff);
+  setTimeout(() => puff.remove(), 800);
 }
