@@ -82,7 +82,7 @@ export function openDialog(className, ...content) {
   const dialog = h('dialog', { class: `card stack ${className}` }, ...content);
   const heading = dialog.querySelector('h3, h2');
   if (heading) {
-    if (!className.includes('recipe-detail')) {
+    if (!className.includes('recipe-detail') && !className.includes('cooking-screen')) {
       const symbol = className.includes('scan') ? '📷' : className.includes('qr') ? '📱' : className.includes('dish') ? '🍽️' : className.includes('welcome') ? '🫶' : className.includes('sort') ? '🧺' : className.includes('tips') ? '💡' : '✨';
       // Tips come from Scoop, so he signs them himself instead of a lightbulb stamp.
       heading.prepend(className.includes('tips')

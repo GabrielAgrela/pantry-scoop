@@ -86,10 +86,10 @@ export class FakeDetector implements IngredientDetector {
 
 export class FakeGenerator implements RecipeGenerator {
   answer: Recipe[] | Error = [sampleRecipe()];
-  calls: { stock: readonly Ingredient[]; profile: KitchenProfile; request: SuggestionRequest }[] = [];
+  calls: { stock: readonly Ingredient[]; profile: KitchenProfile; request: SuggestionRequest; pastTitles: readonly string[] }[] = [];
 
-  async suggest(stock: readonly Ingredient[], profile: KitchenProfile, request: SuggestionRequest): Promise<Recipe[]> {
-    this.calls.push({ stock, profile, request });
+  async suggest(stock: readonly Ingredient[], profile: KitchenProfile, request: SuggestionRequest, pastTitles: readonly string[] = []): Promise<Recipe[]> {
+    this.calls.push({ stock, profile, request, pastTitles });
     if (this.answer instanceof Error) throw this.answer;
     return this.answer;
   }
@@ -240,13 +240,14 @@ export class FakeClassifier implements IngredientClassifier {
 export function servicesFor(db: DatabaseSync, userId: number, detector: FakeDetector, generator: FakeGenerator, classifier = new FakeClassifier()): AppServices {
   const stock = new StockService(new SqliteIngredientRepository(db, userId, FIXED_NOW));
   const profile = new ProfileService(new SqliteProfileRepository(db, userId));
+  const jobs = new SqliteJobRepository(db, userId, FIXED_NOW);
   return {
     stock,
     classification: new IngredientClassificationService(classifier, stock),
     profile,
-    jobs: new JobService(new SqliteJobRepository(db, userId, FIXED_NOW)),
+    jobs: new JobService(jobs),
     scan: new ScanService(detector, stock),
-    recipes: new RecipeService(generator, stock, profile, new SqliteSavedRecipeRepository(db, userId, FIXED_NOW)),
+    recipes: new RecipeService(generator, stock, profile, new SqliteSavedRecipeRepository(db, userId, FIXED_NOW), jobs),
   };
 }
 

@@ -8,5 +8,9 @@ export interface JobRepository {
   find(id: number): Job | undefined;
   /** Newest first. */
   recent(kind: JobKind | undefined, limit: number): Job[];
+  /** Completed recipe batches, newest first, with an exclusive cursor. */
+  recipeHistory(limit: number, beforeId?: number): Job[];
+  /** Deletes finished recipe batches (running ones stay); returns how many went. */
+  clearRecipeHistory(): number;
   countRunning(): number;
 }

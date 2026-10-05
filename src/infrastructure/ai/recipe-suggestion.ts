@@ -84,8 +84,10 @@ const CREATIVITY_LABELS: Record<Exclude<Creativity, 'any'>, string> = {
   adventurous: 'adventurous — unusual or polarising flavour pairings for a curious eater, even if they are easy to prepare',
 };
 
-export function buildRecipePrompt(stock: readonly Ingredient[], profile: KitchenProfile, request: SuggestionRequest): string {
+export function buildRecipePrompt(stock: readonly Ingredient[], profile: KitchenProfile, request: SuggestionRequest, pastTitles: readonly string[] = []): string {
+  const leftOut = new Set(request.avoidIngredients);
   const stockList = stock
+    .filter((item) => !leftOut.has(item.name))
     .map((item) => `- ${item.name} [${item.category}]${item.notes ? ` — ${item.notes}` : ''}`)
     .join('\n');
   const applianceList = profile.appliances
@@ -98,6 +100,14 @@ export function buildRecipePrompt(stock: readonly Ingredient[], profile: Kitchen
   const avoid =
     request.avoidAppliances.length > 0
       ? `- Do not use: ${request.avoidAppliances.join(', ')}. No recipe may need ${request.avoidAppliances.length > 1 ? 'any of these' : 'it'}.\n`
+      : '';
+  const useIngredients =
+    request.useIngredients.length > 0
+      ? `- Must include: ${request.useIngredients.join(', ')}. Every recipe uses ${request.useIngredients.length > 1 ? 'all of these' : 'it'} from the stock.\n`
+      : '';
+  const avoidIngredients =
+    request.avoidIngredients.length > 0
+      ? `- Leave out: ${request.avoidIngredients.join(', ')}. No recipe may contain ${request.avoidIngredients.length > 1 ? 'any of these' : 'it'}, not even as an ingredient to buy.\n`
       : '';
   const dish = requestedDishType(request, profile);
   const craving = request.craving;
@@ -118,6 +128,18 @@ If the stock and constraints can only make fewer than ${request.count} recipe(s)
   const varietyRule = craving
     ? 'Make the recipes genuinely different from each other, while every one still matches what they asked for.'
     : 'Make the recipes genuinely different from each other.';
+  const pastBlock =
+    pastTitles.length > 0
+      ? `Already suggested or saved for a similar request (they have seen these):
+${pastTitles.map((title) => `- ${title}`).join('\n')}
+Do not suggest these again, and avoid near-copies under a new name (same main ingredients cooked the same way). ${
+          craving
+            ? 'Still match what they asked for: change the style, cooking method, flavour or pairing instead.'
+            : 'Pick different dishes, cooking methods or flavour directions.'
+        } If the stock truly leaves no other option, a clearly different take on one of them is acceptable.
+
+`
+      : '';
   const missingRule =
     request.maxMissing === 0
       ? 'Use ONLY ingredients from the stock list (water, ice, salt, pepper and cooking oil are always available).'
@@ -127,7 +149,7 @@ If the stock and constraints can only make fewer than ${request.count} recipe(s)
 
 ${cravingBlock}Suggest ${request.count} different recipe(s).
 - Type: ${type}
-${mustUse}${avoid}${difficulty}${creativity}- Servings: ${request.servings}. Exception: when a machine with a fixed batch size makes the dish (e.g. ice cream), size it to the machine instead.
+${mustUse}${avoid}${useIngredients}${avoidIngredients}${difficulty}${creativity}- Servings: ${request.servings}. Exception: when a machine with a fixed batch size makes the dish (e.g. ice cream), size it to the machine instead.
 - Units: ${profile.units}
   When units are separated by →, they are ranked from most to least preferred. Use the first suitable unit for each quantity; use the next only when an earlier one is impractical or unsuitable. For example, spoons before metric means tbsp/tsp where practical, then g/ml for quantities that need them. Respect any restrictions in the unit preferences.
 - Language: ${profile.language}
@@ -153,7 +175,7 @@ Rules:
 - "estimate" is for the whole recipe, not per serving: kcal and sugar as low–high ranges; protein, carbs (including sugar), fat, fibre and salt as your best single estimate in grams; "portions" is how many servings or pieces the yield divides into (e.g. 2 for "2 servings", 6 for "~750 ml mix (6 scoops)").
 - ${varietyRule}
 
-Stock:
+${pastBlock}Stock:
 ${stockList}`;
 }
 
@@ -166,9 +188,9 @@ export class AiRecipeGenerator implements RecipeGenerator {
     this.effort = effort;
   }
 
-  async suggest(stock: readonly Ingredient[], profile: KitchenProfile, request: SuggestionRequest): Promise<Recipe[]> {
+  async suggest(stock: readonly Ingredient[], profile: KitchenProfile, request: SuggestionRequest, pastTitles: readonly string[] = []): Promise<Recipe[]> {
     const answer = await this.model.complete({
-      prompt: buildRecipePrompt(stock, profile, request),
+      prompt: buildRecipePrompt(stock, profile, request, pastTitles),
       schemaName: 'recipe_suggestions',
       schema: recipeSchema(profile.dishTypes.map((dish) => dish.name)),
       effort: this.effort,

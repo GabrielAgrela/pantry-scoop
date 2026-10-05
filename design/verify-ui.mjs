@@ -8,13 +8,14 @@ const dom = new JSDOM(readFileSync(`${base}/public/index.html`, 'utf8'), { url: 
 const { window } = dom;
 let lastScroll;
 window.scrollTo = (x, y) => { lastScroll = [x, y]; };
+window.HTMLElement.prototype.scrollTo = function ({ top, left } = {}) { if (top !== undefined) this.scrollTop = top; if (left !== undefined) this.scrollLeft = left; };
 globalThis.requestAnimationFrame = window.requestAnimationFrame.bind(window);
 globalThis.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
 globalThis.setInterval = window.setInterval.bind(window);
 globalThis.clearInterval = window.clearInterval.bind(window);
 for (const key of ['window', 'document', 'location', 'history', 'localStorage', 'CustomEvent', 'HTMLElement', 'HTMLDialogElement', 'DOMParser', 'Node', 'navigator']) Object.defineProperty(globalThis, key, { value: key === 'window' ? window : window[key], configurable: true });
 window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
-window.HTMLDialogElement.prototype.close = function () { this.open = false; };
+window.HTMLDialogElement.prototype.close = function () { if (!this.open) return; this.open = false; this.dispatchEvent(new window.Event('close')); };
 globalThis.confirm = () => true;
 const { api } = await import(`${base}/public/js/api.js`);
 const { sampleRecipe } = await import(`${base}/test/fakes/fixtures.ts`);
@@ -42,7 +43,8 @@ Object.assign(api, {
  updateProfile:async(data)=>{profile={...profile,...clone(data)};return {profile:clone(profile)};},
  resetProfile:async()=>({profile:clone(profile)}),
  listSavedRecipes:async()=>({recipes:clone(saved)}),
- suggestRecipes:async(data)=>{suggestionPayload=clone(data);return {job:{id:1,status:'succeeded',result:{recipes:[recipe]}}};},
+ recipeHistory:async()=>({batches:[],nextBefore:null}),
+ suggestRecipes:async(data)=>{suggestionPayload=clone(data);return {job:{id:1,status:'succeeded',createdAt:new Date().toISOString(),finishedAt:new Date().toISOString(),result:{recipes:[recipe]}}};},
  saveRecipe:async(recipe)=>{saved.push({id:1,recipe:clone(recipe)});return {ok:true};},
  deleteSavedRecipe:async(id)=>{saved=saved.filter(i=>i.id!==id);},
  completeSignIn:async(url)=>{completedUrl=url;return {ok:true};},
@@ -178,13 +180,23 @@ assert.equal(recipes.querySelector('.form-options').open,false);
 input(recipes.querySelector('[aria-label=Craving]'),'A cozy dinner');
 pick(recipes.querySelector('[aria-label=Servings]'),'4');
 const [oven,blender]=recipes.querySelectorAll('.appliance-choice');oven.click();blender.click();blender.click();assert.equal(oven.dataset.mode,'use');assert.equal(blender.dataset.mode,'avoid');const easy=recipes.querySelector('.difficulty-picker input[value=easy]');easy.checked=true;easy.dispatchEvent(new window.Event('change'));
+const pantrySearch=recipes.querySelector('.ingredient-search input');const findIngredient=(text)=>{pantrySearch.value=text;pantrySearch.dispatchEvent(new window.Event('input'));return [...recipes.querySelectorAll('.ingredient-choice')];};
+assert.deepEqual(findIngredient('').map((chip)=>chip.dataset.name),[]);assert.deepEqual(findIngredient('MILK').map((chip)=>chip.dataset.name),['Milk'],'search ignores case');ingredients.push({id:99,name:'Saffron',category:'other',notes:'',inStock:false,emoji:'🌼',createdAt:'2026-10-01T12:00:00Z'});window.dispatchEvent(new window.CustomEvent('pantry:stock-changed'));await tick();assert.deepEqual(findIngredient('saffron').map((chip)=>chip.dataset.name),[],'out-of-stock items are not offered');
+findIngredient('tom')[0].click();assert.equal(document.activeElement.dataset.name,'Tomatoes');assert.equal(document.activeElement.dataset.mode,'use');
+const lemons=findIngredient('lem').find((chip)=>chip.dataset.name==='Lemons');lemons.click();recipes.querySelector('.ingredient-choice[data-name="Lemons"]').click();assert.equal(recipes.querySelector('.ingredient-choice[data-name="Lemons"]').dataset.mode,'avoid');
+assert.match(recipes.querySelector('.option-title .muted').textContent,/1 ingredient in · 1 ingredient out/);
 submit(recipes.querySelector('form'));await tick();
+let cookingScreen=$('dialog.cooking-screen');assert.ok(cookingScreen,'asking for ideas opens the order screen');assert.match(cookingScreen.textContent,/Your order/);assert.match(cookingScreen.textContent,/A cozy dinner/);assert.match(cookingScreen.querySelector('.cs-chip').textContent,/Tomatoes/);assert.match(cookingScreen.querySelector('.cs-chip.is-out').textContent,/Lemons/);
+assert.equal(suggestionPayload,undefined,'nothing is sent while the countdown runs');button(cookingScreen,'Cancel').click();await tick();assert.equal($('dialog.cooking-screen'),null);assert.equal(suggestionPayload,undefined,'cancelling sends nothing');
+submit(recipes.querySelector('form'));await tick();cookingScreen=$('dialog.cooking-screen');await new Promise((resolve)=>setTimeout(resolve,5200));await tick();
+assert.ok(cookingScreen.classList.contains('is-sent'),'the order goes out when the timer runs out');assert.deepEqual(suggestionPayload.useIngredients,['Tomatoes']);assert.deepEqual(suggestionPayload.avoidIngredients,['Lemons']);
+await new Promise((resolve)=>setTimeout(resolve,500));assert.equal($('dialog.cooking-screen'),null,'the screen steps aside once sent');
 assert.equal(suggestionPayload.craving,'A cozy dinner');assert.equal(suggestionPayload.servings,4);assert.deepEqual(suggestionPayload.appliances,['Oven']);assert.deepEqual(suggestionPayload.avoidAppliances,['Blender']);assert.equal(suggestionPayload.difficulty,'easy');
 assert.equal(recipes.querySelectorAll('.suggestion-grid article').length,1);
 recipes.querySelector('.recipe-bookmark').click();await tick();
 assert.equal(saved.length,1);
 assert.equal(recipes.querySelector('.recipe-bookmark').getAttribute('aria-pressed'),'true');
-button(recipes,'Saved 1').click();
+button(recipes,'Saved recipes (1)').click();
 assert.equal(recipes.querySelectorAll('.saved-recipe').length,1);
 recipes.querySelector('.recipe-open').click();
 assert.match($('dialog').textContent,/Ingredients/);
@@ -195,7 +207,7 @@ $('dialog button[aria-label="Close recipe"]').click();
 console.log('PASS recipes: generation payload, bookmark, saved collection and detail sheet');
 let recipeFinished=false;
 api.suggestRecipes=async()=>({job:{id:2,status:'running'}});
-api.getJob=async()=>({job:{id:2,status:recipeFinished?'succeeded':'running',result:{recipes:[recipe]}}});
+api.getJob=async()=>({job:{id:2,status:recipeFinished?'succeeded':'running',createdAt:new Date().toISOString(),finishedAt:new Date().toISOString(),result:{recipes:[recipe]}}});
 submit(recipes.querySelector('form'));await tick();
 assert.equal($('#recipe-progress').hidden,false);
 assert.equal(recipes.querySelector('.recipe-results .spinner'),null);
@@ -227,6 +239,55 @@ recipeFinished=true;await new Promise(r=>setTimeout(r,1600));
 assert.equal($('#recipe-progress').hidden,true);
 assert.equal(recipes.querySelector('.recipe-generator .primary').disabled,false);
 console.log('PASS recipe progress: persistent across tabs and other toasts, clears on completion');
+assert.equal(recipes.querySelectorAll('.ideas-batch').length,1,'only the latest generation is shown by default');
+assert.equal(recipes.querySelector('.ideas-batch').dataset.jobId,'2');
+button(recipes,'Show older ideas').click();
+assert.equal(recipes.querySelectorAll('.ideas-batch').length,2,'older generations expand on demand');
+assert.equal(recipes.querySelector('.ideas-history-toggle').getAttribute('aria-expanded'),'true');
+button(recipes,'Hide older ideas').click();
+assert.equal(recipes.querySelectorAll('.ideas-batch').length,1,'older generations can be hidden again');
+assert.equal(document.activeElement,recipes.querySelector('.ideas-history-toggle'),'toggle keeps keyboard focus after hiding');
+assert.equal(recipes.querySelector('.ideas-history-toggle').getAttribute('aria-expanded'),'false');
+assert.equal(recipes.querySelector('[data-job-id="1"] .ideas-new-badge'),null,'only the newest batch gets the new badge');
+assert.equal($('.ready-notice[data-kind="recipes"] .ready-dismiss').hidden,true,'ideas notice can only be opened');
+button($('.tabbar'),'Recipes').click(); await tick();
+assert.ok($('.ready-notice[data-kind="recipes"]:not(.leaving)'),'visiting Recipes keeps the ready notice');
+button(recipes,'Saved recipes (1)').click();
+const recipeSearch=recipes.querySelector('[aria-label="Search recipes"]');
+input(recipeSearch,'no matching dish');
+assert.equal(recipes.querySelectorAll('.recipe-card').length,0);
+assert.match(recipes.querySelector('.recipe-collections').textContent,/No recipes found/);
+input(recipeSearch,recipe.ingredients[0].name.toUpperCase());
+assert.equal(recipes.querySelectorAll('.saved-recipe').length,1,'saved search matches ingredients case-insensitively');
+assert.ok($('.ready-notice[data-kind="recipes"]:not(.leaving)'),'searching keeps the ready notice');
+$('.ready-notice[data-kind="recipes"] .ready-open').click();
+await new Promise(resolve => setTimeout(resolve, 100));
+assert.equal(document.body.dataset.page,'recipes');
+assert.equal(document.activeElement.closest('.ideas-batch').dataset.jobId,'2','notification focuses the exact completed batch');
+assert.equal(recipes.querySelector('[role="tab"][aria-selected="true"]').textContent,'Ideas');
+assert.equal(recipes.querySelectorAll('.ideas-batch.is-highlighted').length,0,'opening a notification does not ring the batch');
+assert.equal(recipeSearch.value,'','opening a notification clears search so the new batch is visible');
+assert.equal(JSON.parse(localStorage.getItem('pantry:recipes.seenBatches')).includes(2),true);
+api.recipeHistory=async(before,search)=>({batches:search==='older dish'?[{id:0,createdAt:new Date().toISOString(),finishedAt:new Date().toISOString(),recipes:[{...recipe,title:'An older dish'}]}]:[],nextBefore:null});
+recipeSearch.focus(); input(recipeSearch,'older dish'); await new Promise(resolve=>setTimeout(resolve,300));
+assert.equal(recipes.querySelectorAll('.recipe-card').length,1);
+assert.match(recipes.querySelector('.recipe-collections').textContent,/An older dish/);
+assert.equal(document.activeElement,recipeSearch,'rendering search results keeps input focus');
+let resolveOldSearch;
+api.recipeHistory=async(before,search)=>search==='slow'?new Promise(resolve=>{resolveOldSearch=resolve;}):({batches:[],nextBefore:null});
+input(recipeSearch,'slow'); await new Promise(resolve=>setTimeout(resolve,280));
+input(recipeSearch,'new query'); await new Promise(resolve=>setTimeout(resolve,280));
+resolveOldSearch({batches:[{id:0,createdAt:new Date().toISOString(),finishedAt:new Date().toISOString(),recipes:[recipe]}],nextBefore:null}); await tick();
+assert.equal(recipes.querySelectorAll('.recipe-card').length,0,'late search responses cannot replace the current search');
+recipes.querySelector('[aria-label="Clear recipe search"]').click();
+assert.equal(recipeSearch.value,'');
+assert.equal(recipes.querySelectorAll('.ideas-batch').length,1,'clearing search restores latest generation only');
+button(recipes,'Show older ideas').click();
+assert.equal(recipes.querySelectorAll('.ideas-batch').length,2,'search does not discard earlier loaded generations');
+button(recipes,'Hide older ideas').click();
+console.log('PASS recipe search: saved ingredients, older ideas, clear, stable focus and stale response protection');
+console.log('PASS ideas history: latest generation, show/hide older, new marker, notification navigation and focused batch');
+button($('.tabbar'),'Kitchen').click(); await tick();
 assert.equal(kitchen.querySelectorAll('.appliance').length,2);
 pick(kitchen.querySelector('[aria-label=Servings]'),'3');
 button(kitchen,'Add').click();

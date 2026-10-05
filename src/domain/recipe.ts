@@ -68,6 +68,10 @@ export interface SuggestionRequest {
   readonly appliances: readonly string[];
   /** Appliances no recipe may use (names as in the kitchen profile). */
   readonly avoidAppliances: readonly string[];
+  /** Stock ingredients every recipe must use (names as in the pantry). Empty = no preference. */
+  readonly useIngredients: readonly string[];
+  /** Stock ingredients no recipe may use (names as in the pantry). */
+  readonly avoidIngredients: readonly string[];
   readonly difficulty: Difficulty;
   readonly creativity: Creativity;
 }
@@ -104,6 +108,21 @@ function requestedAppliances(value: unknown, profile: KitchenProfile, field = 'a
   return [...new Set(names)];
 }
 
+/** Resolves requested ingredient names against what is in stock, returning the pantry's spelling. */
+function requestedIngredients(value: unknown, stock: readonly { readonly name: string }[], field: string): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || !value.every((v) => typeof v === 'string')) {
+    throw new ValidationError(`${field} must be a list of names.`);
+  }
+  const byKey = new Map(stock.map((item) => [normalizeName(item.name), item.name]));
+  const names = value.map((name: string) => {
+    const match = byKey.get(normalizeName(name));
+    if (!match) throw new ValidationError(`"${name}" is not in stock. Pick it from your pantry.`);
+    return match;
+  });
+  return [...new Set(names)];
+}
+
 /** The kitchen's dish type a request asks for; undefined for 'any'. */
 export function requestedDishType(request: SuggestionRequest, profile: KitchenProfile): DishType | undefined {
   return profile.dishTypes.find((dish) => dish.name === request.kind);
@@ -117,8 +136,11 @@ function requestedKind(value: unknown, profile: KitchenProfile): string {
   return match.name;
 }
 
-/** Defaults (servings), dish types and allowed appliances come from the kitchen profile. */
-export function createSuggestionRequest(input: unknown, profile: KitchenProfile): SuggestionRequest {
+/**
+ * Defaults (servings), dish types and allowed appliances come from the kitchen profile;
+ * ingredients to use or leave out must be in stock.
+ */
+export function createSuggestionRequest(input: unknown, profile: KitchenProfile, stock: readonly { readonly name: string }[] = []): SuggestionRequest {
   const raw = (typeof input === 'object' && input !== null ? input : {}) as Record<string, unknown>;
   const craving = raw.craving ?? '';
   if (typeof craving !== 'string') throw new ValidationError('craving must be text.');
@@ -136,6 +158,10 @@ export function createSuggestionRequest(input: unknown, profile: KitchenProfile)
   const avoidAppliances = requestedAppliances(raw.avoidAppliances, profile, 'avoidAppliances');
   const clash = appliances.find((name) => avoidAppliances.includes(name));
   if (clash) throw new ValidationError(`"${clash}" cannot be both used and avoided.`);
+  const useIngredients = requestedIngredients(raw.useIngredients, stock, 'useIngredients');
+  const avoidIngredients = requestedIngredients(raw.avoidIngredients, stock, 'avoidIngredients');
+  const ingredientClash = useIngredients.find((name) => avoidIngredients.includes(name));
+  if (ingredientClash) throw new ValidationError(`"${ingredientClash}" cannot be both used and left out.`);
   return {
     kind,
     count: boundedInt(raw.count, 'count', 3, 1, SUGGESTION_LIMITS.maxCount),
@@ -144,9 +170,56 @@ export function createSuggestionRequest(input: unknown, profile: KitchenProfile)
     craving: craving.trim(),
     appliances,
     avoidAppliances,
+    useIngredients,
+    avoidIngredients,
     difficulty: difficulty as Difficulty,
     creativity: creativity as Creativity,
   };
+}
+
+/** Recipes the person has already seen: a past batch (with what was asked) or a saved recipe (craving unknown). */
+export interface PastRecipes {
+  readonly craving?: string;
+  readonly recipes: readonly Recipe[];
+}
+
+export const MAX_PAST_TITLES = 30;
+
+/** Every word of the (normalised) craving with 3+ letters appears in the recipe's title or summary. */
+function namesCraving(recipe: Recipe, craving: string): boolean {
+  const text = normalizeName(`${recipe.title} ${recipe.summary}`);
+  const words = craving.split(/[^\p{L}\p{N}]+/u).filter((word) => word.length >= 3);
+  return words.length > 0 && words.every((word) => text.includes(word));
+}
+
+/** Would this past recipe be a valid answer to the request, so suggesting it again would repeat it? */
+function fitsRequest(recipe: Recipe, request: SuggestionRequest, pastCraving: string | undefined): boolean {
+  const has = (names: readonly string[], wanted: readonly string[]) => {
+    const keys = new Set(names.map(normalizeName));
+    return wanted.every((name) => keys.has(normalizeName(name)));
+  };
+  const craving = normalizeName(request.craving);
+  if (craving && normalizeName(pastCraving ?? '') !== craving && !namesCraving(recipe, craving)) return false;
+  if (request.kind !== ANY_DISH && normalizeName(recipe.kind) !== normalizeName(request.kind)) return false;
+  if (request.difficulty !== 'any' && recipe.difficulty && recipe.difficulty !== request.difficulty) return false;
+  if (request.creativity !== 'any' && recipe.creativity && recipe.creativity !== request.creativity) return false;
+  return has(recipe.equipment, request.appliances) && has(recipe.ingredients.map((item) => item.name), request.useIngredients);
+}
+
+/**
+ * Titles of earlier ideas that fit the same request, newest source first and without duplicates,
+ * so the generator can steer away from repeating them.
+ */
+export function pastTitlesFor(request: SuggestionRequest, sources: readonly PastRecipes[], limit = MAX_PAST_TITLES): string[] {
+  const titles = new Map<string, string>();
+  for (const source of sources) {
+    for (const recipe of source.recipes) {
+      if (titles.size >= limit) return [...titles.values()];
+      const key = normalizeName(recipe.title);
+      if (!titles.has(key) && fitsRequest(recipe, request, source.craving)) titles.set(key, recipe.title.trim());
+    }
+  }
+  return [...titles.values()];
 }
 
 /**

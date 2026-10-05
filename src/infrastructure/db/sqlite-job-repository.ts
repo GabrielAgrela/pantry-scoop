@@ -55,7 +55,9 @@ export class SqliteJobRepository implements JobRepository {
       .get(this.userId, kind, JSON.stringify(request ?? null), this.now().toISOString());
     this.db
       .prepare(
-        `DELETE FROM jobs WHERE user_id = ? AND id NOT IN (SELECT id FROM jobs WHERE user_id = ? ORDER BY id DESC LIMIT ?)`,
+        `DELETE FROM jobs WHERE user_id = ? AND status != 'running'
+         AND NOT (kind = 'recipes' AND status = 'succeeded')
+         AND id NOT IN (SELECT id FROM jobs WHERE user_id = ? ORDER BY id DESC LIMIT ?)`,
       )
       .run(this.userId, this.userId, KEEP_PER_USER);
     return toJob(row as unknown as Row);
@@ -83,6 +85,19 @@ export class SqliteJobRepository implements JobRepository {
 
   countRunning(): number {
     return (this.db.prepare(`SELECT COUNT(*) AS n FROM jobs WHERE user_id = ? AND status = 'running'`).get(this.userId) as { n: number }).n;
+  }
+
+  recipeHistory(limit: number, beforeId?: number): Job[] {
+    const rows = this.db.prepare(
+      `SELECT * FROM jobs WHERE user_id = ? AND kind = 'recipes' AND status = 'succeeded'
+       AND (? IS NULL OR id < ?) ORDER BY id DESC LIMIT ?`,
+    ).all(this.userId, beforeId ?? null, beforeId ?? null, limit);
+    return (rows as unknown as Row[]).map(toJob);
+  }
+
+  clearRecipeHistory(): number {
+    const result = this.db.prepare(`DELETE FROM jobs WHERE user_id = ? AND kind = 'recipes' AND status != 'running'`).run(this.userId);
+    return Number(result.changes);
   }
 
   private finish(id: number, status: JobStatus, result: string | null, error: string | null): void {

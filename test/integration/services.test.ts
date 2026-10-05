@@ -195,7 +195,20 @@ describe('RecipeService', () => {
     const call = ctx.generator.calls[0]!;
     assert.deepEqual(call.stock.map((i) => i.name), ['Natas']);
     assert.equal(call.profile.servings, 4);
-    assert.deepEqual(call.request, { kind: 'Dessert', count: 1, servings: 4, maxMissing: 0, craving: 'mango', appliances: [], avoidAppliances: [], difficulty: 'any', creativity: 'any' });
+    assert.deepEqual(call.request, { kind: 'Dessert', count: 1, servings: 4, maxMissing: 0, craving: 'mango', appliances: [], avoidAppliances: [], useIngredients: [], avoidIngredients: [], difficulty: 'any', creativity: 'any' });
+  });
+
+  it('tells the generator about earlier ideas for a similar request', async () => {
+    const { stock, recipes, jobs } = ctx.services;
+    stock.addManual({ name: 'Natas' });
+    recipes.save(sampleRecipe({ title: 'Saved sundae', kind: 'Dessert' }));
+    ctx.generator.answer = [sampleRecipe({ title: 'Mango sorbet', kind: 'Dessert' }), sampleRecipe({ title: 'Roast chicken', kind: 'Dinner' })];
+    const plan = recipes.plan({ craving: '' });
+    const job = jobs.start('recipes', plan.request, async () => ({ recipes: await recipes.generate(plan) }));
+    while (jobs.find(job.id)!.status === 'running') await new Promise((done) => setImmediate(done));
+
+    await recipes.suggest({ kind: 'dessert' });
+    assert.deepEqual(ctx.generator.calls.at(-1)!.pastTitles, ['Saved sundae', 'Mango sorbet']);
   });
 
   it('lets a request override the default servings', async () => {

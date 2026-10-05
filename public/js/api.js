@@ -72,6 +72,13 @@ export const api = {
 
   suggestRecipes: (options) => request('POST', '/api/recipes/suggestions', options),
   listSavedRecipes: () => request('GET', '/api/recipes/saved'),
+  recipeHistory: (before, search = '') => {
+    const params = new URLSearchParams();
+    if (before) params.set('before', before);
+    if (search) params.set('search', search);
+    return request('GET', `/api/recipes/history${params.size ? `?${params}` : ''}`);
+  },
+  clearRecipeHistory: () => request('DELETE', '/api/recipes/history'),
   saveRecipe: (recipe) => request('POST', '/api/recipes/saved', { recipe }),
   deleteSavedRecipe: (id) => request('DELETE', `/api/recipes/saved/${id}`),
 

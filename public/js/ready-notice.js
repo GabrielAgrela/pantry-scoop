@@ -9,7 +9,7 @@ import { emoji, icon } from './ui.js';
 const stack = h('div', { class: 'ready-stack', 'aria-live': 'polite' });
 const notices = new Map();
 
-export function showReady(key, { symbol, title, detail, label = title, onOpen, onDismiss }) {
+export function showReady(key, { symbol, title, detail, label = title, onOpen, onDismiss, dismissible = true }) {
   let notice = notices.get(key);
   if (!notice) {
     if (!stack.isConnected) document.body.append(stack);
@@ -33,6 +33,7 @@ export function showReady(key, { symbol, title, detail, label = title, onOpen, o
   }
   notice.open.setAttribute('aria-label', `${label}: ${detail}`);
   notice.dismiss.setAttribute('aria-label', `Dismiss: ${label}`);
+  notice.dismiss.hidden = !dismissible;
   notice.open.onclick = () => { hideReady(key); onOpen?.(); };
   notice.dismiss.onclick = () => { hideReady(key); onDismiss?.(); };
 }

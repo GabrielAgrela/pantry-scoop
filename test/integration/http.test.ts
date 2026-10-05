@@ -524,7 +524,8 @@ describe('recipes API', () => {
       const collection = (await call('GET', '/api/recipes/saved')).body.recipes.find((entry: { id: number }) => entry.id === saved.id).recipe;
       const job = (await call('GET', `/api/jobs/${generated.id}`)).body.job.result.recipes[0];
       const recent = (await call('GET', '/api/jobs?kind=recipes')).body.jobs[0].result.recipes[0];
-      for (const current of [collection, job, recent]) {
+      const history = (await call('GET', '/api/recipes/history')).body.batches[0].recipes[0];
+      for (const current of [collection, job, recent, history]) {
         assert.deepEqual(current.ingredients.map((i: { inStock: boolean }) => i.inStock), expected);
         assert.deepEqual(current.ingredients.map((i: { emoji: string }) => i.emoji), ['🥥', '🥛'], 'older recipe payloads get emojis on every read path');
       }
@@ -573,6 +574,79 @@ describe('recipes API', () => {
     assert.equal(saved.status, 201);
     assert.equal((await call('GET', '/api/recipes/saved')).body.recipes.length, 1);
     assert.equal((await call('DELETE', `/api/recipes/saved/${saved.body.saved.id}`)).status, 204);
+  });
+
+  it('pages completed idea batches without exposing another account or failed jobs', async () => {
+    const alice = await signIn('alice');
+    const call = api(alice);
+    const services = ctx.container.forUser(ctx.auth.userForSession(alice)!.id);
+    const ids: number[] = [];
+    for (let i = 0; i < 12; i++) {
+      const job = services.jobs.start('recipes', {}, async () => ({ recipes: [sampleRecipe({ title: `Idea ${i}` })] }));
+      await finished(call, job.id); ids.unshift(job.id);
+    }
+    const failed = services.jobs.start('recipes', {}, async () => { throw new AiUnavailableError('Failed'); });
+    await finished(call, failed.id);
+    const bob = api(await signIn('bob'));
+    assert.deepEqual((await bob('GET', '/api/recipes/history')).body, { batches: [], nextBefore: null });
+    const first = (await call('GET', '/api/recipes/history')).body;
+    assert.deepEqual(first.batches.map((b: { id: number }) => b.id), ids.slice(0, 10));
+    assert.equal(first.nextBefore, ids[9]);
+    const second = (await call('GET', `/api/recipes/history?before=${first.nextBefore}`)).body;
+    assert.deepEqual(second.batches.map((b: { id: number }) => b.id), ids.slice(10));
+    assert.equal(second.nextBefore, null);
+    for (const cursor of ['0', '-1', 'abc', '1.5']) {
+      assert.equal((await call('GET', `/api/recipes/history?before=${cursor}`)).status, 400);
+    }
+    assert.equal((await api(undefined)('GET', '/api/recipes/history')).status, 401);
+  });
+
+  it('clears finished idea batches but keeps running ones, saved recipes and other accounts', async () => {
+    const alice = await signIn('alice');
+    const call = api(alice);
+    const services = ctx.container.forUser(ctx.auth.userForSession(alice)!.id);
+    const done = services.jobs.start('recipes', {}, async () => ({ recipes: [sampleRecipe({ title: 'Old idea' })] }));
+    await finished(call, done.id);
+    await call('POST', '/api/recipes/saved', { recipe: sampleRecipe({ title: 'Kept' }) });
+    const bobSession = await signIn('bob');
+    const bob = api(bobSession);
+    const bobServices = ctx.container.forUser(ctx.auth.userForSession(bobSession)!.id);
+    const bobJob = bobServices.jobs.start('recipes', {}, async () => ({ recipes: [sampleRecipe()] }));
+    await finished(bob, bobJob.id);
+    let release = () => {};
+    const running = services.jobs.start('recipes', {}, () => new Promise((resolve) => { release = () => resolve({ recipes: [sampleRecipe({ title: 'Late idea' })] }); }));
+
+    assert.equal((await call('DELETE', '/api/recipes/history')).status, 204);
+    assert.deepEqual((await call('GET', '/api/recipes/history')).body.batches, []);
+    assert.equal((await call('GET', '/api/recipes/saved')).body.recipes.length, 1);
+    assert.equal((await bob('GET', '/api/recipes/history')).body.batches.length, 1);
+    release(); await finished(call, running.id);
+    assert.deepEqual((await call('GET', '/api/recipes/history')).body.batches.map((b: { id: number }) => b.id), [running.id]);
+    assert.equal((await api(undefined)('DELETE', '/api/recipes/history')).status, 401);
+  });
+
+  it('searches older batches, paginates matches and handles case, accents and literal punctuation', async () => {
+    const session = await signIn('alice');
+    const call = api(session);
+    const jobs = ctx.container.forUser(ctx.auth.userForSession(session)!.id).jobs;
+    const ids: number[] = [];
+    for (let i = 0; i < 65; i++) {
+      const recipe = sampleRecipe({ title: i < 12 ? `Crème & lemon ${i}` : `Pasta ${i}`,
+        ingredients: [{ name: i === 0 ? 'Cócónut' : 'Basil', amount: '1 cup', inStock: false }] });
+      const job = jobs.start('recipes', {}, async () => ({ recipes: [recipe, sampleRecipe({ title: 'Unrelated dish' })] }));
+      await finished(call, job.id);
+      if (i < 12) ids.unshift(job.id);
+    }
+    const first = (await call('GET', '/api/recipes/history?search=CREME%20%26%20LEMON')).body;
+    assert.deepEqual(first.batches.map((b: { id: number }) => b.id), ids.slice(0, 10));
+    assert.equal(first.batches[0].recipes.length, 1, 'only matching recipes appear within a batch');
+    const second = (await call('GET', `/api/recipes/history?search=creme&before=${first.nextBefore}`)).body;
+    assert.deepEqual(second.batches.map((b: { id: number }) => b.id), ids.slice(10));
+    assert.equal(second.nextBefore, null);
+    assert.equal((await call('GET', '/api/recipes/history?search=COCONUT')).body.batches.length, 1);
+    assert.deepEqual((await call('GET', '/api/recipes/history?search=%25')).body, { batches: [], nextBefore: null });
+    assert.equal((await call('GET', `/api/recipes/history?search=${'x'.repeat(201)}`)).status, 400);
+    assert.equal((await api(await signIn('bob'))('GET', '/api/recipes/history?search=creme')).body.batches.length, 0);
   });
 });
 

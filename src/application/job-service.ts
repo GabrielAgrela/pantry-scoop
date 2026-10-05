@@ -43,6 +43,14 @@ export class JobService {
     return this.jobs.recent(kind, limit);
   }
 
+  recipeHistory(limit: number, beforeId?: number): Job[] {
+    return this.jobs.recipeHistory(limit, beforeId);
+  }
+
+  clearRecipeHistory(): number {
+    return this.jobs.clearRecipeHistory();
+  }
+
   private async run(id: number, work: () => Promise<unknown>): Promise<void> {
     try {
       this.jobs.succeed(id, await work());

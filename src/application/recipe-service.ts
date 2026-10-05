@@ -5,10 +5,13 @@ import type { KitchenProfile } from '../domain/kitchen-profile.ts';
 import {
   assertRecipe,
   createSuggestionRequest,
+  pastTitlesFor,
+  type PastRecipes,
   type Recipe,
   type SavedRecipe,
   type SuggestionRequest,
 } from '../domain/recipe.ts';
+import type { JobRepository } from '../ports/job-repository.ts';
 import type { RecipeGenerator } from '../ports/recipe-generator.ts';
 import type { SavedRecipeRepository } from '../ports/saved-recipe-repository.ts';
 import type { ProfileService } from './profile-service.ts';
@@ -19,32 +22,55 @@ export interface SuggestionPlan {
   readonly request: SuggestionRequest;
   readonly stock: readonly Ingredient[];
   readonly profile: KitchenProfile;
+  /** Earlier ideas that fit this request, so the new batch does not repeat them. */
+  readonly pastTitles: readonly string[];
 }
+
+/** How many recent batches of ideas are checked for repeats. */
+const PAST_BATCHES = 20;
 
 export class RecipeService {
   private readonly generator: RecipeGenerator;
   private readonly stock: StockService;
   private readonly profiles: ProfileService;
   private readonly saved: SavedRecipeRepository;
+  private readonly history: Pick<JobRepository, 'recipeHistory'>;
 
-  constructor(generator: RecipeGenerator, stock: StockService, profiles: ProfileService, saved: SavedRecipeRepository) {
+  constructor(
+    generator: RecipeGenerator,
+    stock: StockService,
+    profiles: ProfileService,
+    saved: SavedRecipeRepository,
+    history: Pick<JobRepository, 'recipeHistory'>,
+  ) {
     this.generator = generator;
     this.stock = stock;
     this.profiles = profiles;
     this.saved = saved;
+    this.history = history;
   }
 
   /** Validates the request against the current stock and kitchen (synchronous). */
   plan(input: unknown): SuggestionPlan {
     const profile = this.profiles.get();
-    const request = createSuggestionRequest(input, profile);
     const stock = this.stock.listInStock();
     if (stock.length === 0) throw new ValidationError('Nothing is in stock. Scan or add some ingredients first.');
-    return { request, stock, profile };
+    const request = createSuggestionRequest(input, profile, stock);
+    return { request, stock, profile, pastTitles: pastTitlesFor(request, this.pastRecipes()) };
   }
 
   async generate(plan: SuggestionPlan): Promise<Recipe[]> {
-    return this.withCurrentStock(await this.generator.suggest(plan.stock, plan.profile, plan.request));
+    return this.withCurrentStock(await this.generator.suggest(plan.stock, plan.profile, plan.request, plan.pastTitles));
+  }
+
+  /** Saved recipes first (the person kept them), then recent batches, newest first. */
+  private pastRecipes(): PastRecipes[] {
+    const batches = this.history.recipeHistory(PAST_BATCHES).map((job) => {
+      const craving = (job.request as { craving?: unknown } | null)?.craving;
+      const recipes = (job.result as { recipes?: unknown } | null)?.recipes;
+      return { craving: typeof craving === 'string' ? craving : '', recipes: Array.isArray(recipes) ? (recipes as Recipe[]) : [] };
+    });
+    return [{ recipes: this.saved.list().map((entry) => entry.recipe) }, ...batches];
   }
 
   /** Availability is current pantry state, never the recipe's saved snapshot. */

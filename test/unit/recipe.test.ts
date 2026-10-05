@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { assertRecipe, createSuggestionRequest, missingIngredients } from '../../src/domain/recipe.ts';
+import { assertRecipe, createSuggestionRequest, missingIngredients, pastTitlesFor } from '../../src/domain/recipe.ts';
 import { DEFAULT_PROFILE } from '../../src/domain/kitchen-profile.ts';
 import { sampleRecipe } from '../fakes/fixtures.ts';
 
@@ -8,8 +8,8 @@ const profile = (servings: number) => ({ ...DEFAULT_PROFILE, servings, appliance
 
 describe('createSuggestionRequest', () => {
   it('applies defaults', () => {
-    assert.deepEqual(createSuggestionRequest({}, profile(2)), { kind: 'any', count: 3, servings: 2, maxMissing: 0, craving: '', appliances: [], avoidAppliances: [], difficulty: 'any', creativity: 'any' });
-    assert.deepEqual(createSuggestionRequest(undefined, profile(4)), { kind: 'any', count: 3, servings: 4, maxMissing: 0, craving: '', appliances: [], avoidAppliances: [], difficulty: 'any', creativity: 'any' });
+    assert.deepEqual(createSuggestionRequest({}, profile(2)), { kind: 'any', count: 3, servings: 2, maxMissing: 0, craving: '', appliances: [], avoidAppliances: [], useIngredients: [], avoidIngredients: [], difficulty: 'any', creativity: 'any' });
+    assert.deepEqual(createSuggestionRequest(undefined, profile(4)), { kind: 'any', count: 3, servings: 4, maxMissing: 0, craving: '', appliances: [], avoidAppliances: [], useIngredients: [], avoidIngredients: [], difficulty: 'any', creativity: 'any' });
   });
 
   it('accepts form strings and trims the craving', () => {
@@ -20,7 +20,7 @@ describe('createSuggestionRequest', () => {
       maxMissing: 1,
       craving: 'coffee',
       appliances: [],
-      avoidAppliances: [],
+      avoidAppliances: [], useIngredients: [], avoidIngredients: [],
       difficulty: 'any',
       creativity: 'any',
     });
@@ -41,6 +41,16 @@ describe('createSuggestionRequest', () => {
     assert.throws(() => createSuggestionRequest({ avoidAppliances: ['Air fryer'] }, profile(2)), /not in your kitchen/);
     assert.throws(() => createSuggestionRequest({ avoidAppliances: 'Oven' }, profile(2)), /avoidAppliances must be a list/);
     assert.throws(() => createSuggestionRequest({ appliances: ['Oven'], avoidAppliances: ['oven'] }, profile(2)), /both used and avoided/);
+  });
+
+  it('resolves ingredients to use or leave out against the stock', () => {
+    const stock = [{ name: 'Natas' }, { name: 'Café' }];
+    const request = createSuggestionRequest({ useIngredients: ['natas', 'NATAS'], avoidIngredients: ['cafe'] }, profile(2), stock);
+    assert.deepEqual(request.useIngredients, ['Natas']);
+    assert.deepEqual(request.avoidIngredients, ['Café']);
+    assert.throws(() => createSuggestionRequest({ useIngredients: ['Mango'] }, profile(2), stock), /not in stock/);
+    assert.throws(() => createSuggestionRequest({ avoidIngredients: 'Natas' }, profile(2), stock), /avoidIngredients must be a list/);
+    assert.throws(() => createSuggestionRequest({ useIngredients: ['Natas'], avoidIngredients: ['natas'] }, profile(2), stock), /both used and left out/);
   });
 
   it('resolves the dish type to the kitchen spelling', () => {
@@ -111,5 +121,43 @@ describe('missingIngredients', () => {
       missingIngredients(sampleRecipe()).map((i) => i.name),
       ['Avelãs'],
     );
+  });
+});
+
+describe('pastTitlesFor', () => {
+  const request = (overrides = {}) => ({ ...createSuggestionRequest({}, DEFAULT_PROFILE), ...overrides });
+
+  it('lists every earlier idea when the request is open, without duplicates', () => {
+    const titles = pastTitlesFor(request(), [
+      { recipes: [sampleRecipe({ title: 'Mango sorbet' })] },
+      { craving: 'pizza', recipes: [sampleRecipe({ title: 'mango  SORBET' }), sampleRecipe({ title: 'Pan pizza' })] },
+    ]);
+    assert.deepEqual(titles, ['Mango sorbet', 'Pan pizza']);
+  });
+
+  it('keeps only ideas that fit the same dish type, labels, appliances and ingredients', () => {
+    const recipes = [
+      sampleRecipe({ title: 'Fits' }),
+      sampleRecipe({ title: 'Other dish', kind: 'Dinner' }),
+      sampleRecipe({ title: 'Harder', difficulty: 'hard' }),
+      sampleRecipe({ title: 'No blender', equipment: ['Ice-cream machine'] }),
+      sampleRecipe({ title: 'No natas', ingredients: [{ name: 'Leite magro', amount: '1', inStock: true }] }),
+    ];
+    const titles = pastTitlesFor(request({ kind: 'Ice-Cream', difficulty: 'easy', appliances: ['blender'], useIngredients: ['natas'] }), [{ recipes }]);
+    assert.deepEqual(titles, ['Fits']);
+  });
+
+  it('with a craving, keeps batches for the same craving and recipes that name it', () => {
+    const titles = pastTitlesFor(request({ craving: 'Fries' }), [
+      { craving: 'fries', recipes: [sampleRecipe({ title: 'Crispy potato wedges' })] },
+      { craving: 'something salty', recipes: [sampleRecipe({ title: 'Garlic fries' }), sampleRecipe({ title: 'Popcorn' })] },
+      { recipes: [sampleRecipe({ title: 'Sweet potato fries' }), sampleRecipe({ title: 'Mash' })] },
+    ]);
+    assert.deepEqual(titles, ['Crispy potato wedges', 'Garlic fries', 'Sweet potato fries']);
+  });
+
+  it('stops at the limit', () => {
+    const recipes = Array.from({ length: 10 }, (_, i) => sampleRecipe({ title: `Idea ${i}` }));
+    assert.equal(pastTitlesFor(request(), [{ recipes }], 4).length, 4);
   });
 });

@@ -108,17 +108,19 @@ export function createContainer({ config, db, cipher, openaiAuth, responses, goo
       : { scan: config.chatgpt.scanEffort, sort: config.chatgpt.scanEffort, recipe: config.chatgpt.recipeEffort };
     const stock = new StockService(new SqliteIngredientRepository(db, userId));
     const profile = new ProfileService(new SqliteProfileRepository(db, userId));
+    const jobs = new SqliteJobRepository(db, userId);
     return {
       stock,
       classification: new IngredientClassificationService(new AiIngredientClassifier(model, effort.sort), stock),
       profile,
-      jobs: new JobService(new SqliteJobRepository(db, userId), onJobError),
+      jobs: new JobService(jobs, onJobError),
       scan: new ScanService(new AiIngredientDetector(model, effort.scan), stock),
       recipes: new RecipeService(
         new AiRecipeGenerator(model, effort.recipe),
         stock,
         profile,
         new SqliteSavedRecipeRepository(db, userId),
+        jobs,
       ),
     };
   };

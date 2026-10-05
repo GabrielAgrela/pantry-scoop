@@ -47,7 +47,37 @@ describe('JobService', () => {
 
   it('keeps only the most recent jobs', () => {
     const { repo } = setup();
-    for (let i = 0; i < 35; i++) repo.create('recipes', { i });
+    for (let i = 0; i < 35; i++) {
+      const job = repo.create('scan', { i });
+      repo.succeed(job.id, {});
+    }
     assert.equal(repo.recent(undefined, 100).length, 30);
+  });
+
+  it('preserves recipe history and running jobs through cleanup, with isolated cursor pages', () => {
+    const { db, repo } = setup();
+    const running = repo.create('scan', {});
+    const ids = [];
+    for (let i = 0; i < 35; i++) {
+      const job = repo.create('recipes', { i });
+      repo.succeed(job.id, { recipes: [] });
+      ids.unshift(job.id);
+    }
+    for (let i = 0; i < 35; i++) {
+      const job = repo.create('scan', {});
+      repo.succeed(job.id, {});
+    }
+    const failed = repo.create('recipes', {});
+    repo.fail(failed.id, { code: 'internal', message: 'Failed' });
+    const otherId = accountRepos(db).users.create(identity('other')).id;
+    const other = new SqliteJobRepository(db, otherId);
+    const privateJob = other.create('recipes', {});
+    other.succeed(privateJob.id, { recipes: [] });
+    assert.equal(repo.find(running.id)?.status, 'running');
+    assert.equal(repo.recipeHistory(100).length, 35);
+    assert.deepEqual(repo.recipeHistory(10).map((j) => j.id), ids.slice(0, 10));
+    assert.deepEqual(repo.recipeHistory(10, ids[9]).map((j) => j.id), ids.slice(10, 20));
+    assert.equal(other.recipeHistory(100).length, 1);
+    assert.equal(repo.find(privateJob.id), undefined);
   });
 });

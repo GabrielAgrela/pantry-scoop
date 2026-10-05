@@ -46,6 +46,13 @@ if (process.env.QA_LONG_IDEA) {
   services.recipes.save(ctx.generator.answer[0]);
 }
 const milk=services.stock.list().find(i=>i.name==='Milk');services.stock.update(milk.id,{inStock:false});
+if (process.env.QA_RECIPE_HISTORY) {
+  for (let i = 0; i < 12; i++) {
+    services.jobs.start('recipes', {}, async () => ({ recipes: [sampleRecipe({ title: `Earlier idea ${i + 1}` })] }));
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  services.recipes.save(sampleRecipe({ title: 'A favourite saved recipe' }));
+}
 const soup = services.stock.addManual({name:'Miso soup',notes:'Ready to heat'}).ingredient;
 ctx.classifier.delayMs = 1400;
 const classificationAnswer = ctx.classifier.answer = services.stock.list().filter((item) => item.category === 'other').map(({id,name}) => ({id,category: name === 'Miso soup' ? 'custom:Soups & broths' : ['Azeite','Água'].includes(name) ? (name === 'Água' ? 'drinks' : 'condiments') : 'herbs-spices'}));
