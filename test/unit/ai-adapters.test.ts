@@ -129,7 +129,7 @@ describe('AiRecipeGenerator', () => {
     assert.match(prompt, /- Cecotec Gelacy 1200 Touch ice-cream machine: .*700–850 ml/);
     assert.match(prompt, /- Freezer: Around -15 ºC/);
     assert.match(prompt, /- Hob\n/);
-    assert.match(prompt, /feel like: coffee/);
+    assert.match(prompt, /What they asked for: "coffee"/);
     assert.match(prompt, /Use ONLY ingredients from the stock list/);
     assert.match(prompt, /- Natas \[dairy\] — half carton left/);
     assert.equal(requests[0]!.images, undefined);
@@ -139,7 +139,19 @@ describe('AiRecipeGenerator', () => {
     const prompt = buildRecipePrompt([stockItem('Natas')], DEFAULT_PROFILE, { kind: 'any', count: 1, servings: 3, maxMissing: 2, craving: '', appliances: [], avoidAppliances: [], difficulty: 'any' as const, creativity: 'any' as const });
     assert.match(prompt, /at most 2 ingredient/);
     assert.match(prompt, /Type: anything/);
-    assert.doesNotMatch(prompt, /feel like/);
+    assert.doesNotMatch(prompt, /asked for/);
+    assert.match(prompt, /varied levels are welcome/);
+  });
+
+  it('keeps every idea on the craving instead of mixing in other dishes', () => {
+    const prompt = buildRecipePrompt([stockItem('Batata')], DEFAULT_PROFILE, { kind: 'any', count: 5, servings: 4, maxMissing: 0, craving: 'fries', appliances: [], avoidAppliances: [], difficulty: 'any' as const, creativity: 'any' as const });
+    assert.match(prompt, /^You are .*\n\nWhat they asked for: "fries"\nThis is the main request/);
+    assert.match(prompt, /Type: whatever fits what they asked for/);
+    assert.doesNotMatch(prompt, /mix it up: savoury and sweet/);
+    assert.match(prompt, /fewer than 5 recipe\(s\) that truly match, return only those/);
+    assert.match(prompt, /Never pad the list/);
+    assert.match(prompt, /keep most ideas familiar takes on what they asked for/);
+    assert.doesNotMatch(prompt, /varied levels are welcome/);
   });
 
   it('treats each stock line as one indivisible product, even a blend', () => {

@@ -100,9 +100,24 @@ export function buildRecipePrompt(stock: readonly Ingredient[], profile: Kitchen
       ? `- Do not use: ${request.avoidAppliances.join(', ')}. No recipe may need ${request.avoidAppliances.length > 1 ? 'any of these' : 'it'}.\n`
       : '';
   const dish = requestedDishType(request, profile);
-  const type = dish ? `${dish.name}${dish.details ? ` (${dish.details})` : ''}` : 'anything that suits the stock (mix it up: savoury and sweet)';
+  const craving = request.craving;
+  const anyType = craving ? 'whatever fits what they asked for' : 'anything that suits the stock (mix it up: savoury and sweet)';
+  const type = dish ? `${dish.name}${dish.details ? ` (${dish.details})` : ''}` : anyType;
   const difficulty = request.difficulty === 'any' ? '' : `- Difficulty: ${DIFFICULTY_LABELS[request.difficulty]}\n`;
   const creativity = request.creativity === 'any' ? '' : `- Flavour adventure: ${CREATIVITY_LABELS[request.creativity]}\n`;
+  const cravingBlock = craving
+    ? `What they asked for: "${craving}"
+This is the main request. Every recipe must be something a person who typed "${craving}" would immediately recognise as that, not a loose pun on the word or a different dish that merely shares a shape, texture or ingredient. Vary the ideas within the request (seasoning, cut, cooking method, dip or side) instead of drifting away from it.
+If the stock and constraints can only make fewer than ${request.count} recipe(s) that truly match, return only those (at least one, the closest honest match). Never pad the list with ideas that do not match.
+
+`
+    : '';
+  const flavourRule = craving
+    ? 'Respect the selected flavour adventure; when it is unrestricted, keep most ideas familiar takes on what they asked for, with at most one gentle twist.'
+    : 'Respect the selected flavour adventure; when it is unrestricted, varied levels are welcome.';
+  const varietyRule = craving
+    ? 'Make the recipes genuinely different from each other, while every one still matches what they asked for.'
+    : 'Make the recipes genuinely different from each other.';
   const missingRule =
     request.maxMissing === 0
       ? 'Use ONLY ingredients from the stock list (water, ice, salt, pepper and cooking oil are always available).'
@@ -110,7 +125,7 @@ export function buildRecipePrompt(stock: readonly Ingredient[], profile: Kitchen
 
   return `You are an expert home cook helping someone decide what to make with what they have.
 
-Suggest ${request.count} different recipe(s).
+${cravingBlock}Suggest ${request.count} different recipe(s).
 - Type: ${type}
 ${mustUse}${avoid}${difficulty}${creativity}- Servings: ${request.servings}. Exception: when a machine with a fixed batch size makes the dish (e.g. ice cream), size it to the machine instead.
 - Units: ${profile.units}
@@ -123,20 +138,20 @@ ${applianceList || '(basic hob and utensils only)'}
 User preferences:
 ${profile.preferences || '(none)'}
 
-${request.craving ? `Today they feel like: ${request.craving}\n\n` : ''}Rules:
+Rules:
 - ${missingRule}
 - Mark every ingredient line with inStock = true only if it comes from the stock list; use the stock name.
 - Each stock line is ONE product as bought, even when its name lists several things (e.g. "Sal, pimenta e alho" is a pre-mixed seasoning, not separate salt, pepper and garlic). Use such a product whole, by its full stock name, or not at all; never take one component out of it, and never write an amount like "the salt only". If the recipe needs just one of those things on its own, list it as its own ingredient instead.
 - "kind" is the dish type that fits best.
 - Label each recipe's actual cooking difficulty: "easy" (few steps, simple techniques), "medium" (some technique or several components), or "hard" (ambitious techniques). Respect the requested difficulty when one is selected.
-- Label each recipe's actual flavour adventure as "familiar" (classic crowd pleaser), "creative" (a gentle twist), or "adventurous" (unusual or polarising). This describes broad taste appeal, never food safety or a guarantee that everyone will like it. Olive oil ice cream is "adventurous" even when easy to make. Respect the selected flavour adventure; when it is unrestricted, varied levels are welcome. Assess difficulty and creativity independently.
+- Label each recipe's actual flavour adventure as "familiar" (classic crowd pleaser), "creative" (a gentle twist), or "adventurous" (unusual or polarising). This describes broad taste appeal, never food safety or a guarantee that everyone will like it. Olive oil ice cream is "adventurous" even when easy to make. ${flavourRule} Assess difficulty and creativity independently.
 - "equipment" lists the appliances from the kitchen list the recipe uses.
 - "makes" is a short yield only, e.g. "2 servings", "12 biscuits" or "~750 ml mix (6 scoops)".
 - totalMinutes covers prep + cooking (+ churning), excluding passive chilling/freezing time; mention that in the steps.
 - Steps are short and concrete.
 - "tips" are practical: texture, substitutions, storage.
 - "estimate" is for the whole recipe, not per serving: kcal and sugar as low–high ranges; protein, carbs (including sugar), fat, fibre and salt as your best single estimate in grams; "portions" is how many servings or pieces the yield divides into (e.g. 2 for "2 servings", 6 for "~750 ml mix (6 scoops)").
-- Make the recipes genuinely different from each other.
+- ${varietyRule}
 
 Stock:
 ${stockList}`;
