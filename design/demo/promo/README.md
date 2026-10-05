@@ -1,6 +1,6 @@
 # Pantry Scoop promo video
 
-`pantry-scoop-promo.mp4`: a 47-second vertical promo (1080×1920, 60 fps, H.264 with AAC stereo).
+`pantry-scoop-promo.mp4`: a 56-second vertical promo (1080×1920, 60 fps, H.264 with AAC stereo).
 
 ![Three moments from the promo: scanned ingredients popping out, recipe ideas arriving, night mode sweeping in](poster.jpg)
 

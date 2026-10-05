@@ -8,7 +8,7 @@ const PT = 640 / 390; // phone pixels per app point
 const STATUS = 47; // status bar height in points; the app viewport sits below it
 const PHONE_W = 690, PHONE_H = 1435, ORIGIN_X = PHONE_W / 2, ORIGIN_Y = PHONE_H / 2;
 const BASE = { x: 540, y: 1122 };
-const DAY = { ink: '#493442', hot: '#b64967', muted: '#8a6f80' };
+const DAY = { ink: '#493442', hot: '#b64967', muted: '#6f5667' };
 const NIGHT = { ink: '#fff2e9', hot: '#f7b6cd', muted: '#d8c1d3' };
 
 const $ = (id) => document.getElementById(id);
@@ -25,7 +25,12 @@ function rng(seed) { return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; l
 const hex = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
 const mix = (a, b, t) => { const x = hex(a), y = hex(b); return `rgb(${x.map((v, i) => Math.round(lerp(v, y[i], t))).join(',')})`; };
 
-let cap, events, taps, drags, srcTable, total, footageEnd, tapTimes = [];
+let cap, events, taps, drags, srcTable, total, footageEnd, tapTimes = [], holdWindows = [];
+const LEAD = 0.22; // a pause starts this long before its tap
+/** Output time of a chapter's pause (its caption and sticker set arrive with it). */
+const pauseAt = (label, type = 'mark') => outAt(at(label, type) - LEAD);
+/** 0…1 while the footage holds for a caption: the phone steps back and the screen softens. */
+const holdAmount = (t) => Math.max(0, ...holdWindows.map(([a, b]) => smooth((t - a) / 0.3) * (1 - smooth((t - b + 0.32) / 0.32))));
 const at = (label, type = 'mark') => events.find((e) => (e.label ?? e.type) === label && (type === 'any' || e.type === type))?.t;
 const ev = (type) => events.find((e) => e.type === type)?.t;
 
@@ -38,8 +43,10 @@ function buildTimeline() {
     [at('sort', 'focus') - 2.55, at('sort', 'focus') - 0.05, 1.8], // scrolling to the strays
     [at('sort', 'focus') + 0.3, at('sort', 'focus') + 1.5, 1.25], // finding their shelves
     [ev('type') - 1.6, ev('thinking') - 0.15, 1.12], // filling in the form
-    [ev('thinking') + 0.1, ev('ideas') - 0.05, 1.7], // Scoop thinks
   ];
+  // The footage pauses on each new caption, so it is read before anything moves again.
+  // Each pause sits just before the chapter's first tap, before the finger appears.
+  const holds = [[0, 1.3], [at('scan') - LEAD, 1.35], [at('tidy') - LEAD, 1.35], [at('recipes') - LEAD, 1.35], [at('save', 'focus') - LEAD, 1.2], [at('dark') - LEAD, 1.25]];
   const speedAt = (s) => {
     let v = 1;
     for (const [a, b, k] of ramps) v += (k - 1) * smooth((s - a) / 0.2) * (1 - smooth((s - (b - 0.2)) / 0.2));
@@ -49,8 +56,18 @@ function buildTimeline() {
   srcTable = [];
   const introFrames = Math.round(INTRO * FPS);
   for (let n = 0; n < introFrames; n++) srcTable.push(0);
-  let s = 0;
-  while (s < footageEnd - 1 / FPS) { srcTable.push(s); s += speedAt(s) / FPS; }
+  let s = 0, next = 0;
+  holdWindows = [];
+  while (s < footageEnd - 1 / FPS) {
+    while (next < holds.length && holds[next][0] <= s + 1e-6) {
+      const [point, seconds] = holds[next++];
+      s = Math.max(s, point); // so outAt(point) finds the start of the pause
+      holdWindows.push([srcTable.length / FPS, srcTable.length / FPS + seconds]);
+      for (let k = 0; k < Math.round(seconds * FPS); k++) srcTable.push(s);
+    }
+    srcTable.push(s);
+    s = Math.min(s + speedAt(s) / FPS, next < holds.length ? holds[next][0] : Infinity);
+  }
   for (let n = 0; n < Math.round(OUTRO * FPS); n++) srcTable.push(footageEnd - 1 / FPS);
   total = srcTable.length;
 }
@@ -161,7 +178,7 @@ const SETS = {
 };
 let chapters;
 function stickerSet(t) {
-  chapters ??= [[0, 'intro'], [INTRO - 0.35, 'onboarding'], [outAt(at('scan')), 'scan'], [outAt(at('tidy')), 'tidy'], [outAt(at('recipes')), 'recipes'], [outAt(ev('night') + 0.5), 'night']];
+  chapters ??= [[0, 'intro'], [INTRO - 0.35, 'onboarding'], [pauseAt('scan'), 'scan'], [pauseAt('tidy'), 'tidy'], [pauseAt('recipes'), 'recipes'], [outAt(ev('night') + 0.5), 'night']];
   let i = 0;
   while (i + 1 < chapters.length && t >= chapters[i + 1][0]) i++;
   return { cur: chapters[i], prev: chapters[i - 1] ?? null };
@@ -207,13 +224,13 @@ function bezier(x1, y1, x2, y2, x) {
 const TITLES = [];
 function buildTitles() {
   const defs = [
-    { from: INTRO - 0.12, until: outAt(at('scan')) - 0.3, words: ['Meet', '*Scoop*'], emoji: '👋', sub: 'your tiny kitchen chef' },
-    { from: outAt(at('scan')), until: outAt(at('tidy')) - 0.3, words: ['Snap', 'your', '*groceries*'], emoji: '📸', sub: 'one photo fills your pantry' },
-    { from: outAt(at('tidy')), until: outAt(at('recipes')) - 0.3, words: ['Tidy,', 'all', '*by itself*'], emoji: '✨', sub: 'restock in a tap · sort with ChatGPT' },
-    { from: outAt(at('recipes')), until: outAt(ev('ideas')) - 0.3, words: ['Cook', 'what', 'you', '*have*'], emoji: '🍝', sub: 'tell Scoop what you’re craving' },
-    { from: outAt(ev('ideas')) - 0.05, until: outAt(ev('saved')) - 0.45, words: ['Ideas', 'that', '*fit*'], emoji: '🌟', sub: 'built from what’s in your pantry' },
-    { from: outAt(ev('saved')) - 0.3, until: outAt(at('dark')) - 0.3, words: ['Keep', 'the', '*keepers*'], emoji: '💗', sub: 'your little recipe box' },
-    { from: outAt(at('dark')), until: footageStop() + 0.05, words: ['Cozy', '*night*', 'mode'], emoji: '🌙', sub: 'sweet dreams, little pantry' },
+    { from: INTRO - 0.12, until: pauseAt('scan') - 0.3, words: ['Meet', '*Scoop*'], emoji: '👋', sub: 'your tiny kitchen chef' },
+    { from: pauseAt('scan'), until: pauseAt('tidy') - 0.3, words: ['Snap', 'your', '*groceries*'], emoji: '📸', sub: 'one photo fills your pantry' },
+    { from: pauseAt('tidy'), until: pauseAt('recipes') - 0.3, words: ['Tidy,', 'all', '*by itself*'], emoji: '✨', sub: 'restock in a tap · sort with ChatGPT' },
+    { from: pauseAt('recipes'), until: outAt(ev('thinking')) - 0.15, words: ['Cook', 'what', 'you', '*have*'], emoji: '🍝', sub: 'tell Scoop what you’re craving' },
+    { from: outAt(ev('thinking')) + 0.15, until: pauseAt('save', 'focus') - 0.3, words: ['Ideas', 'that', '*fit*'], emoji: '🌟', sub: 'built from what’s in your pantry' },
+    { from: pauseAt('save', 'focus'), until: pauseAt('dark') - 0.3, words: ['Keep', 'the', '*keepers*'], emoji: '💗', sub: 'your little recipe box' },
+    { from: pauseAt('dark'), until: footageStop() + 0.05, words: ['Cozy', '*night*', 'mode'], emoji: '🌙', sub: 'sweet dreams, little pantry' },
   ];
   const root = $('titles');
   for (const def of defs) {
@@ -243,7 +260,7 @@ function drawTitles(t, zoom) {
   stage.setProperty('--ink', mix(DAY.ink, NIGHT.ink, smooth(night * 1.5 - 0.25)));
   stage.setProperty('--hot', mix(DAY.hot, NIGHT.hot, smooth(night * 1.5 - 0.25)));
   stage.setProperty('--muted', mix(DAY.muted, NIGHT.muted, smooth(night * 1.5 - 0.25)));
-  const hide = Math.max(smooth(zoom * 1.6), blackout(t));
+  const hide = Math.max(smooth(zoom * 2.6), blackout(t));
   for (const title of TITLES) {
     const local = t - title.from, leaving = t - title.until;
     const visible = local > -0.05 && leaving < 0.5;
@@ -285,7 +302,7 @@ function buildZooms() {
     { from: ev('review') + 0.3, to: ev('added') - 0.1, zoom: 1.24, focus: [195, found[1] - 110], target: [540, 980] },
     { from: at('sort', 'focus') + 0.05, to: at('sort', 'focus') + 2.35, zoom: 1.4, focus: [sort[0] + 60, sort[1] + 40], target: [540, 980] },
     { from: at('hats', 'focus') - 0.1, to: at('hats', 'focus') + 1.3, zoom: 1.5, focus: [hats[0], hats[1]], target: [540, 1000] },
-    { from: ev('saved') - 0.15, to: ev('saved') + 0.95, zoom: 1.32, focus: [save[0], save[1] - 40], target: [540, 1050] },
+    { from: ev('saved') - 0.1, to: ev('saved') + 0.95, zoom: 1.32, focus: [save[0], save[1] - 40], target: [540, 1050] },
     { from: ev('night') + 1.0, to: footageEnd + 0.1, zoom: 1.32, focus: [avatar[0] - 70, avatar[1] + 90], target: [560, 820] },
   ].map((z) => ({ ...z, oIn: outAt(z.from), oOut: Math.min(outAt(z.to), footageStop()) }));
 }
@@ -311,6 +328,8 @@ function phonePose(t) {
   // Ending: steps back and down so the title card can take over.
   const end = easeInOut((t - footageStop()) / 0.95);
   y = lerp(y, 1540, end); s *= lerp(1, 0.6, end); rz += -5 * end; ry += 9 * end;
+  const hold = holdAmount(t);
+  s *= 1 - 0.035 * hold; y += 18 * hold;
   // Each tap gives the phone a tiny squish, as if it felt the finger.
   for (const tapAt of tapTimes) { const d = t - tapAt; if (d > -0.05 && d < 0.3) s *= 1 - 0.007 * Math.sin(clamp((d + 0.05) / 0.35) * Math.PI); }
   // Punch-in on the current focus.
@@ -413,7 +432,7 @@ function drawFinger(g, s, night) {
   }
 }
 
-async function drawScreen(s) {
+async function drawScreen(s, t) {
   const index = Math.round(s * FPS);
   const img = await loadFrame(index);
   for (let k = 1; k <= 4; k++) loadFrame(index + k);
@@ -427,6 +446,8 @@ async function drawScreen(s) {
   g.fillStyle = lum(bottom) < 0.45 ? 'rgba(255,255,255,.75)' : 'rgba(30,20,26,.82)';
   g.beginPath(); g.roundRect(585 - 201, 2532 - 24 - 15, 402, 15, 7.5); g.fill();
   drawFinger(g, s, dark);
+  const veil = holdAmount(t);
+  if (veil > 0) { g.fillStyle = dark ? `rgba(34,27,40,${0.3 * veil})` : `rgba(255,250,243,${0.3 * veil})`; g.fillRect(0, 0, 1170, 2532); }
   return dark;
 }
 
@@ -634,7 +655,7 @@ function buildCues() {
     title.words.forEach((_, i) => cue(title.from + i * 0.075, 'bloop', { i: i + 2 }));
     cue(title.from + title.words.length * 0.075 + 0.08, 'pop');
   }
-  for (const [time, name] of [[outAt(at('scan')), 'scan'], [outAt(at('tidy')), 'tidy'], [outAt(at('recipes')), 'recipes'], [outAt(ev('night') + 0.5), 'night']]) cue(time, 'swap', { name });
+  for (const [time, name] of [[pauseAt('scan'), 'scan'], [pauseAt('tidy'), 'tidy'], [pauseAt('recipes'), 'recipes'], [outAt(ev('night') + 0.5), 'night']]) cue(time, 'swap', { name });
   for (const tap of taps) cue(outAt(tap.t), 'tap');
   for (const drag of drags) { const a = outAt(drag.t); cue(a, 'swish', { dur: outAt(drag.t + drag.ms / 1000) - a }); }
   for (const typed of events.filter((e) => e.type === 'type')) [...typed.text].forEach((ch, i) => { if (ch !== ' ') cue(outAt(typed.t + (i * typed.perChar) / 1000), 'tick', { i }); });
@@ -676,7 +697,7 @@ async function setup() {
   INGREDIENTS.forEach((s) => sticker(s, 118)); sticker('💗', 120);
   await loadFrame(0);
   window.totalFrames = total;
-  window.timeline = { total, intro: INTRO, footageStop: footageStop(), nightStart: outAt(ev('night') + 0.12), cues: buildCues(), outAt: Object.fromEntries(['scan', 'tidy', 'recipes', 'dark'].map((m) => [m, outAt(at(m))])), events: Object.fromEntries(['photo', 'review', 'added', 'thinking', 'ideas', 'saved', 'night'].map((e) => [e, outAt(ev(e))])), taps: taps.map((tap) => outAt(tap.t)), drags: drags.map((d) => outAt(d.t)) };
+  window.timeline = { total, intro: INTRO, footageStop: footageStop(), nightStart: outAt(ev('night') + 0.12), cues: buildCues(), outAt: Object.fromEntries(['scan', 'tidy', 'recipes', 'dark'].map((m) => [m, pauseAt(m)])), events: Object.fromEntries(['photo', 'review', 'added', 'thinking', 'ideas', 'saved', 'night'].map((e) => [e, outAt(ev(e))])), taps: taps.map((tap) => outAt(tap.t)), drags: drags.map((d) => outAt(d.t)) };
 }
 
 window.renderFrame = async (n) => {
@@ -684,7 +705,7 @@ window.renderFrame = async (n) => {
   drawBackground(t);
   const pose = phonePose(t);
   placePhone(pose);
-  await drawScreen(s);
+  await drawScreen(s, t);
   drawTitles(t, pose.zoom);
   drawFx(t, s, pose);
   drawIntro(t, pose);

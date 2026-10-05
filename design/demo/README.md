@@ -10,4 +10,4 @@ Source footage: `pantry-scoop-mobile-live.mp4` and `mobile-details-live.mp4`. `l
 
 Validation: inspected phone UI interactions in the built-in Browser, reviewed actual video frame contact sheets, confirmed 55.07-second duration and 1652 frames with ffprobe, and decoded the full final video without errors.
 
-A newer 47-second promo with a designed edit and a synthesised soundtrack is in [promo/](promo/README.md).
+A newer 56-second promo with a designed edit and a synthesised soundtrack is in [promo/](promo/README.md).
