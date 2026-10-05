@@ -115,6 +115,8 @@ export class Recorder {
   }
 
   log(type, data = {}) { this.events.push({ type, t: this.t, frame: this.frame, ...data }); }
+  /** A caption for something that just happened on screen (no finger), pinned to an element. */
+  async note(label, selector, text, inner) { this.log('note', { label, rect: await this.box(selector, text, inner) }); }
   mark(label, data = {}) { this.log('mark', { label, ...data }); }
   async focus(label, selector, text, inner) { this.log('focus', { label, rect: await this.box(selector, text, inner) }); }
 
@@ -125,10 +127,10 @@ export class Recorder {
     return Promise.race([sent, new Promise((resolve) => setTimeout(resolve, 250))]);
   }
 
-  /** A finger tap: down, a short hold, up. */
-  async tap(target, text, { hold = 90, after = 0, ...offset } = {}) {
+  /** A finger tap: down, a short hold, up. `label` says in the edit what the tap does. */
+  async tap(target, text, { hold = 90, after = 0, label, ...offset } = {}) {
     const p = await this.point(target, text, offset);
-    this.log('tap', { x: p.x, y: p.y, hold });
+    this.log('tap', { x: p.x, y: p.y, hold, ...(label ? { label } : {}) });
     await this.touch('touchStart', [p]);
     await this.wait(hold);
     await this.touch('touchEnd', []);

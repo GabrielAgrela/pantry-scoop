@@ -1,27 +1,28 @@
 # Pantry Scoop promo video
 
-`pantry-scoop-promo.mp4`: a 56-second vertical promo (1080×1920, 60 fps, H.264 with AAC stereo).
+`pantry-scoop-promo.mp4`: a 59-second vertical promo (1080×1920, 60 fps, H.264 with AAC stereo).
 
-![Three moments from the promo: scanned ingredients popping out, recipe ideas arriving, night mode sweeping in](poster.jpg)
+![Three moments from the promo: a step label on the scan, recipe ideas arriving, night mode sweeping in](poster.jpg)
 
 The phone shows real use of the app. One continuous session was recorded in Chrome's headless
 shell on a 390×797 phone viewport at 3× resolution (plus a drawn status bar and home indicator).
 It runs the actual HTTP app and frontend over an in-memory database with fake sign-in and
 scripted AI answers. Nothing calls ChatGPT and no real account is touched. The story:
 
-1. Kitchen setup with Scoop (tap Scoop for a tip, drop the microwave, finish setup)
-2. Scanning a grocery photo, reviewing the eight detected ingredients and adding six
+1. Kitchen setup with Scoop (a tip from Scoop, then finish setup)
+2. Scanning a grocery photo, reviewing the eight detected ingredients and adding them
 3. Marking avocados as used up, then "Sort with ChatGPT" for the Other shelf
-4. Asking for cozy recipe ideas (servings, difficulty hats), the idea cards arriving, opening one
-   and saving it
+4. Asking for cozy recipe ideas, the idea cards arriving, opening one and saving it
 5. Switching to night mode from My kitchen
 
-The edit around the phone is designed in HTML and rendered frame by frame. It has a pastel world
-that the app's own theme wave turns to night, chapter captions, sticker sets for each chapter,
-the finger, punch-in zooms, a polaroid of the scanned photo, ingredient stickers, confetti and
-hearts. Scoop opens and closes the video. The soundtrack is synthesised: a ukulele and
-glockenspiel tune that becomes a music-box lullaby at night, plus sound effects placed on the
-same timeline as the visuals.
+The edit is built to be easy to follow. Each chapter opens on a wide shot with its caption
+while the footage pauses. The camera then moves in until the phone fills the frame, and follows
+each step with a label beside the finger saying what it does ("Pick a photo", "Save it") or what
+just happened ("✓ 8 ingredients found"). Around that: a pastel world that the app's own theme
+wave turns to night, a sticker set for each chapter in the wide shots, a polaroid of the scanned
+photo, confetti and hearts. Scoop opens and closes the video. The soundtrack is synthesised: a
+ukulele and glockenspiel tune that becomes a music-box lullaby at night, plus sound effects
+placed on the same timeline as the visuals.
 
 ## How it is made
 
@@ -45,9 +46,10 @@ node design/demo/promo/render.mjs /tmp/promo design/demo/promo/pantry-scoop-prom
   timestamps. Drags move the real scroll container one frame at a time. Touch drags in the
   headless shell either drop movement to touch coalescing or stall frame control when the release
   starts a momentum fling.
-- `capture.mjs` is the scenario. It logs taps, drags, chapters and the boxes the camera zooms to.
-- `compose/` is the stage: `renderFrame(n)` draws output frame `n` from the footage and the log,
-  and exports the sound cues.
+- `capture.mjs` is the scenario. It logs taps with their labels, notes, drags, chapters and
+  focus boxes.
+- `compose/` is the stage: `renderFrame(n)` draws output frame `n` from the footage and the log.
+  The camera path is precomputed with springs, and the stage exports the sound cues.
 - `render.mjs` serves the stage, steps it in the headless shell and pipes JPEG frames to FFmpeg.
 - `audio.mjs` synthesises the soundtrack: a Karplus–Strong ukulele, FM glockenspiel, kalimba
   and music box, soft drums, and a small Schroeder reverb.

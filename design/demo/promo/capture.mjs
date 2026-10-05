@@ -1,6 +1,8 @@
 // Records one continuous session of real app use on a 390×797 phone viewport (plus the status
-// bar and home indicator the edit draws around it). Writes JPEG frames and capture.json (taps,
-// swipes, chapters and focus boxes) for the edit.
+// bar and home indicator the edit draws around it). Writes JPEG frames and capture.json (taps with
+// their on-screen labels, notes, drags, chapters and focus boxes) for the edit.
+//
+// The story keeps to the steps a first-time viewer can follow, with a pause after each result.
 //
 //   node --disable-warning=ExperimentalWarning design/demo/promo/capture.mjs [out-dir] [dpr]
 import { writeFileSync } from 'node:fs';
@@ -39,87 +41,84 @@ try {
 
   rec.mark('onboarding');
   await rec.focus('scoop', '.scoop-companion');
-  await rec.wait(1100);
-  await rec.tap('.scoop-pet');
   await rec.wait(1300);
-  await rec.tap('.guide-tool', 'Microwave');
-  await rec.wait(1200);
-  await rec.tap('.guide-actions button.primary', undefined, { dx: 0.3 });
-  await rec.wait(1100);
-  await rec.tap('.guide-actions button.primary', undefined, { dx: 0.25 }); // left of Scoop's bubble
-  await rec.wait(2100);
+  await rec.tap('.scoop-pet', undefined, { label: 'Tap Scoop for tips' });
+  await rec.wait(1700);
+  await rec.tap('.guide-actions button.primary', undefined, { dx: 0.3, label: 'Keep your tools' });
+  await rec.wait(1400);
+  await rec.tap('.guide-actions button.primary', undefined, { dx: 0.25, label: 'Finish setup' }); // left of Scoop's bubble
+  await rec.wait(2200);
 
   rec.mark('scan');
-  await rec.tap('.pantry-actions button.primary');
-  await rec.wait(1000);
+  await rec.tap('.pantry-actions button.primary', undefined, { label: 'Scan your groceries' });
+  await rec.wait(1100);
   rec.nextFiles([photo]);
-  await rec.tap('dialog.scan-source button', 'Choose photos');
+  await rec.tap('dialog.scan-source button', 'Choose photos', { label: 'Pick a photo' });
   rec.log('photo');
   await rec.until(`document.querySelector('dialog.scan-review .scan-photos img')`, { timeout: 6000 });
   rec.log('review');
-  await rec.wait(1500);
+  await rec.wait(700);
+  await rec.note('8 ingredients found', 'dialog.scan-review .scan-overview');
   await rec.focus('found', 'dialog.scan-review .scan-overview');
-  await rec.drag('dialog.scan-review .review-scroll', { x: 195, y: 620 }, { x: 195, y: 330 }, 550);
+  await rec.wait(1700);
+  await rec.drag('dialog.scan-review .review-scroll', { x: 195, y: 620 }, { x: 195, y: 360 }, 650);
   await rec.wait(900);
-  await rec.tap('dialog.scan-review .review-actions button.primary');
+  await rec.tap('dialog.scan-review .review-actions button.primary', undefined, { label: 'Add them to your pantry' });
   rec.log('added');
-  await rec.wait(1900);
+  await rec.wait(900);
+  await rec.note('Added to the right shelves', '.stock-list .item.fresh');
+  await rec.wait(1700);
 
   rec.mark('tidy');
-  await rec.tap('.item', 'Avocados', { inner: '.stock-toggle' });
-  await rec.wait(1300);
+  await rec.tap('.item', 'Avocados', { inner: '.stock-toggle', label: 'Used them up? One tap' });
+  await rec.wait(1800);
   await swipeUntilVisible('.classify-button', 430);
-  await rec.wait(350);
+  await rec.wait(400);
   await rec.focus('sort', '.classify-button');
-  await rec.tap('.classify-button');
-  await rec.wait(2700);
+  await rec.tap('.classify-button', undefined, { label: 'Sort the strays with ChatGPT' });
+  await rec.wait(2100);
+  await rec.note('New shelves, all sorted', '.category', 'Chocolate');
+  await rec.wait(1700);
 
   rec.mark('recipes');
-  await rec.tap('.tabbar [data-tab="recipes"]');
+  await rec.tap('.tabbar [data-tab="recipes"]', undefined, { label: 'Go to Recipes' });
+  await rec.wait(1100);
+  await rec.tap('.compose-toggle', undefined, { label: 'What shall we cook?' });
   await rec.wait(1000);
-  await rec.tap('.compose-toggle');
-  await rec.wait(900);
-  await rec.tap('.craving-input input');
-  await rec.wait(200);
-  await rec.type('something cozy', { perChar: 55 });
-  await rec.wait(350);
-  // Sideways drags on the wheel stall the headless shell; a tap on a number is just as real.
-  await rec.tap('#view-recipes .recipe-basic-fields .wheel-item', '3');
-  await rec.wait(700);
-  await rec.tap('.recipe-options > summary');
-  await rec.wait(750);
-  await rec.focus('hats', '.difficulty-picker');
-  await rec.tap('.hat-choice.difficulty-easy');
-  await rec.wait(1000);
-  await rec.tap('.recipe-options > summary');
-  await rec.wait(650);
-  await rec.tap('.recipe-suggest');
+  await rec.tap('.craving-input input', undefined, { label: 'Type a craving' });
+  await rec.wait(250);
+  await rec.type('something cozy', { perChar: 70 });
+  await rec.wait(600);
+  await rec.tap('.recipe-suggest', undefined, { label: 'Find recipe ideas' });
   rec.log('thinking');
-  await rec.wait(800);
+  await rec.wait(900);
   // Fold the composer while Scoop thinks, so the ideas land in view.
   await rec.tap('.compose-toggle');
   await rec.until(`document.querySelector('.suggestion-grid .recipe-card.idea-fresh')`, { timeout: 8000 });
   rec.log('ideas');
+  await rec.note('3 ideas from your pantry', '.suggestion-grid');
   await rec.focus('ideas', '.suggestion-grid');
+  await rec.wait(2200);
+  await rec.tap('.suggestion-grid .recipe-open', undefined, { label: 'Open one' });
   await rec.wait(1700);
-  await rec.tap('.suggestion-grid .recipe-open');
-  await rec.wait(1500);
-  await rec.tap('.recipe-next');
+  await rec.tap('.recipe-next', undefined, { label: 'See the ingredients' });
   await rec.wait(1300);
+  await rec.note('All in your pantry', '.recipe-detail .recipe-ingredients .recipe-section-title');
+  await rec.wait(1400);
   await rec.focus('save', '.recipe-save');
-  await rec.tap('.recipe-save');
+  await rec.tap('.recipe-save', undefined, { label: 'Save it' });
   rec.log('saved');
-  await rec.wait(1100);
+  await rec.wait(1500);
   await rec.tap('.recipe-sheet-header button.icon');
-  await rec.wait(1100);
+  await rec.wait(1200);
 
   rec.mark('dark');
-  await rec.tap('.tabbar [data-tab="profile"]');
-  await rec.wait(1100);
+  await rec.tap('.tabbar [data-tab="profile"]', undefined, { label: 'Your kitchen' });
+  await rec.wait(1300);
   await rec.focus('avatar', '.header-end .avatar');
-  await rec.tap('.theme-toggle');
+  await rec.tap('.theme-toggle', undefined, { label: 'Night mode' });
   rec.log('night');
-  await rec.wait(2900);
+  await rec.wait(3000);
   rec.stop();
 } catch (error) {
   console.error(error);

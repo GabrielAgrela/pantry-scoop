@@ -1,13 +1,18 @@
 // The promo's motion design. Every frame is a pure function of its index: renderFrame(n) draws
 // output frame n (60 fps, 1080×1920) from the captured app footage and capture.json's events.
+//
+// Built to be easy to follow: each chapter opens on a wide shot with its caption while the footage
+// pauses, then the camera moves in until the phone fills the frame and follows each step, with a
+// label beside the finger saying what is happening.
 
 const FPS = 60;
 const W = 1080, H = 1920;
-const INTRO = 3.0, OUTRO = 4.2;
+const INTRO = 3.0, OUTRO = 3.9;
 const PT = 640 / 390; // phone pixels per app point
 const STATUS = 47; // status bar height in points; the app viewport sits below it
 const PHONE_W = 690, PHONE_H = 1435, ORIGIN_X = PHONE_W / 2, ORIGIN_Y = PHONE_H / 2;
 const BASE = { x: 540, y: 1122 };
+const FOLLOW = 1.5; // phone scale while following the action: the screen fills the frame
 const DAY = { ink: '#493442', hot: '#b64967', muted: '#6f5667' };
 const NIGHT = { ink: '#fff2e9', hot: '#f7b6cd', muted: '#d8c1d3' };
 
@@ -18,35 +23,31 @@ const smooth = (t) => { t = clamp(t); return t * t * (3 - 2 * t); };
 const easeInOut = (t) => { t = clamp(t); return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2; };
 const easeOut = (t) => 1 - (1 - clamp(t)) ** 3;
 const easeIn = (t) => clamp(t) ** 3;
-const backOut = (t, s = 1.7) => { t = clamp(t) - 1; return 1 + t * t * ((s + 1) * t + s); };
 /** A damped spring from 0 to 1 (t in seconds); overshoots a little, settles in ~0.6 s. */
 const spring = (t, k = 15, d = 7) => (t <= 0 ? 0 : 1 - Math.exp(-d * t) * Math.cos(k * t));
 function rng(seed) { return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 const hex = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
 const mix = (a, b, t) => { const x = hex(a), y = hex(b); return `rgb(${x.map((v, i) => Math.round(lerp(v, y[i], t))).join(',')})`; };
 
-let cap, events, taps, drags, srcTable, total, footageEnd, tapTimes = [], holdWindows = [];
-const LEAD = 0.22; // a pause starts this long before its tap
-/** Output time of a chapter's pause (its caption and sticker set arrive with it). */
-const pauseAt = (label, type = 'mark') => outAt(at(label, type) - LEAD);
-/** 0…1 while the footage holds for a caption: the phone steps back and the screen softens. */
-const holdAmount = (t) => Math.max(0, ...holdWindows.map(([a, b]) => smooth((t - a) / 0.3) * (1 - smooth((t - b + 0.32) / 0.32))));
+let cap, events, taps, drags, notes, srcTable, total, footageEnd, tapTimes = [], holdWindows = [], camera = [];
+const LEAD = 0.22; // a chapter's pause starts this long before its first tap, before the finger appears
 const at = (label, type = 'mark') => events.find((e) => (e.label ?? e.type) === label && (type === 'any' || e.type === type))?.t;
 const ev = (type) => events.find((e) => e.type === type)?.t;
+/** Output time of a chapter's pause (its caption and sticker set arrive with it). */
+const pauseAt = (label) => outAt(at(label) - LEAD);
+/** 0…1 while the footage holds for a caption: the phone steps back and the screen softens. */
+const holdAmount = (t) => Math.max(0, ...holdWindows.map(([a, b]) => smooth((t - a) / 0.3) * (1 - smooth((t - b + 0.32) / 0.32))));
 
 // ---------------------------------------------------------------------------------------------
-// Timeline: output time → footage time. Waiting moments play faster, with eased speed changes.
+// Timeline: output time → footage time, with a pause at every chapter and gently faster waits.
 // ---------------------------------------------------------------------------------------------
 function buildTimeline() {
   const ramps = [
-    [ev('photo') + 0.15, ev('review') - 0.1, 1.6], // scanning…
-    [at('sort', 'focus') - 2.55, at('sort', 'focus') - 0.05, 1.8], // scrolling to the strays
-    [at('sort', 'focus') + 0.3, at('sort', 'focus') + 1.5, 1.25], // finding their shelves
-    [ev('type') - 1.6, ev('thinking') - 0.15, 1.12], // filling in the form
+    [ev('photo') + 0.15, ev('review') - 0.1, 1.4], // scanning…
+    [at('sort', 'focus') - 2.4, at('sort', 'focus') - 0.15, 1.6], // scrolling to the strays
+    [ev('thinking') + 0.3, ev('ideas') - 0.1, 1.4], // Scoop thinks
   ];
-  // The footage pauses on each new caption, so it is read before anything moves again.
-  // Each pause sits just before the chapter's first tap, before the finger appears.
-  const holds = [[0, 1.3], [at('scan') - LEAD, 1.35], [at('tidy') - LEAD, 1.35], [at('recipes') - LEAD, 1.35], [at('save', 'focus') - LEAD, 1.2], [at('dark') - LEAD, 1.25]];
+  const holds = [[0, 1.5], [at('scan') - LEAD, 1.45], [at('tidy') - LEAD, 1.45], [at('recipes') - LEAD, 1.45], [at('dark') - LEAD, 1.35]];
   const speedAt = (s) => {
     let v = 1;
     for (const [a, b, k] of ramps) v += (k - 1) * smooth((s - a) / 0.2) * (1 - smooth((s - (b - 0.2)) / 0.2));
@@ -54,8 +55,7 @@ function buildTimeline() {
   };
   footageEnd = cap.frames / FPS;
   srcTable = [];
-  const introFrames = Math.round(INTRO * FPS);
-  for (let n = 0; n < introFrames; n++) srcTable.push(0);
+  for (let n = 0; n < Math.round(INTRO * FPS); n++) srcTable.push(0);
   let s = 0, next = 0;
   holdWindows = [];
   while (s < footageEnd - 1 / FPS) {
@@ -166,7 +166,7 @@ function wavePath(ctx, p) {
   ctx.lineTo(last[0] - nx * behind, last[1] - ny * behind); ctx.lineTo(first[0] - nx * behind, first[1] - ny * behind); ctx.closePath();
 }
 
-// Sticker slots around the phone; each chapter swaps in its own set with a little pop.
+// Sticker slots around the phone in the wide shots; each chapter swaps in its own set.
 const SLOTS = [[96, 560, 104, -8], [986, 640, 98, 10], [76, 905, 90, 6], [1004, 975, 108, -6], [100, 1255, 100, 9], [980, 1330, 94, -10], [82, 1610, 108, -4], [1000, 1690, 96, 7], [176, 1850, 84, 12], [902, 1862, 90, -9], [74, 112, 72, -12], [1006, 104, 76, 12]];
 const SETS = {
   intro: ['🍋', '🍅', '🌿', '🧁', '🥑', '🍓', '🥕', '🧀', '🍯', '🫖', '✨', '💗'],
@@ -183,7 +183,8 @@ function stickerSet(t) {
   while (i + 1 < chapters.length && t >= chapters[i + 1][0]) i++;
   return { cur: chapters[i], prev: chapters[i - 1] ?? null };
 }
-function drawSlots(ctx, t, nightP) {
+function drawSlots(ctx, t, nightP, follow) {
+  if (follow > 0.98) return; // the phone fills the frame
   const { cur, prev } = stickerSet(t);
   SLOTS.forEach(([x, y, size, rot], i) => {
     const bob = Math.sin((t / 3.4 + i * 0.37) * Math.PI * 2) * 10, wob = Math.sin((t / 4.6 + i * 0.21) * Math.PI * 2) * 7;
@@ -195,19 +196,17 @@ function drawSlots(ctx, t, nightP) {
     if (i >= 10 && cur[1] !== 'intro') { if (prev?.[1] !== 'intro' || since >= 0.22) return; }
     if (cur[1] === 'intro') scale = spring(t - 0.15 - i * 0.05, 14, 7);
     if (i < 2) scale *= 1 - easeIn((t - footageStop()) / 0.3);
-    drawSticker(ctx, symbol, size, x, y + bob, { scale, rot: rot + wob, alpha: lerp(0.92, 0.82, nightP) });
+    drawSticker(ctx, symbol, size, x, y + bob, { scale, rot: rot + wob, alpha: lerp(0.92, 0.82, nightP) * (1 - follow) });
   });
 }
-
-function drawBackground(t) {
+function drawBackground(t, follow) {
   const night = nightProgress(t);
   world(bg, false, t);
   if (night > 0) { bg.save(); wavePath(bg, night); bg.clip(); world(bg, true, t); bg.restore(); }
-  drawSlots(bg, t, night);
+  drawSlots(bg, t, night, follow);
 }
 function nightProgress(t) {
-  const start = outAt(ev('night') + 0.12);
-  const p = clamp((t - start) / 1.05);
+  const p = clamp((t - outAt(ev('night') + 0.12)) / 1.05);
   return p <= 0 ? 0 : p >= 1 ? 1 : bezier(0.45, 0, 0.2, 1, p);
 }
 /** cubic-bezier easing, solved numerically (same curve as the app's wave). */
@@ -219,17 +218,16 @@ function bezier(x1, y1, x2, y2, x) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Captions: one bouncy line per chapter, with a scribbled underline and a sticker emoji.
+// Captions: one bouncy line per chapter, shown on the chapter's wide shot while the footage waits.
 // ---------------------------------------------------------------------------------------------
 const TITLES = [];
 function buildTitles() {
+  const holdEnd = (i) => holdWindows[i][1];
   const defs = [
-    { from: INTRO - 0.12, until: pauseAt('scan') - 0.3, words: ['Meet', '*Scoop*'], emoji: '👋', sub: 'your tiny kitchen chef' },
-    { from: pauseAt('scan'), until: pauseAt('tidy') - 0.3, words: ['Snap', 'your', '*groceries*'], emoji: '📸', sub: 'one photo fills your pantry' },
-    { from: pauseAt('tidy'), until: pauseAt('recipes') - 0.3, words: ['Tidy,', 'all', '*by itself*'], emoji: '✨', sub: 'restock in a tap · sort with ChatGPT' },
-    { from: pauseAt('recipes'), until: outAt(ev('thinking')) - 0.15, words: ['Cook', 'what', 'you', '*have*'], emoji: '🍝', sub: 'tell Scoop what you’re craving' },
-    { from: outAt(ev('thinking')) + 0.15, until: pauseAt('save', 'focus') - 0.3, words: ['Ideas', 'that', '*fit*'], emoji: '🌟', sub: 'built from what’s in your pantry' },
-    { from: pauseAt('save', 'focus'), until: pauseAt('dark') - 0.3, words: ['Keep', 'the', '*keepers*'], emoji: '💗', sub: 'your little recipe box' },
+    { from: INTRO - 0.12, until: holdEnd(0) - 0.05, words: ['Meet', '*Scoop*'], emoji: '👋', sub: 'your tiny kitchen chef' },
+    { from: pauseAt('scan'), until: holdEnd(1) - 0.05, words: ['Snap', 'your', '*groceries*'], emoji: '📸', sub: 'one photo fills your pantry' },
+    { from: pauseAt('tidy'), until: holdEnd(2) - 0.05, words: ['Tidy,', 'all', '*by itself*'], emoji: '✨', sub: 'restock in a tap · sort with ChatGPT' },
+    { from: pauseAt('recipes'), until: holdEnd(3) - 0.05, words: ['Cook', 'what', 'you', '*have*'], emoji: '🍝', sub: 'recipe ideas from your pantry' },
     { from: pauseAt('dark'), until: footageStop() + 0.05, words: ['Cozy', '*night*', 'mode'], emoji: '🌙', sub: 'sweet dreams, little pantry' },
   ];
   const root = $('titles');
@@ -252,76 +250,74 @@ function buildTitles() {
     TITLES.push({ ...def, line, sub, words, emoji, path, length });
   }
 }
-/** Moments when something else owns the top of the stage. */
-const blackout = (t) => { const a = outAt(ev('review')) + 0.3, b = outAt(ev('added')) + 0.62; return smooth((t - a) / 0.25) * (1 - smooth((t - b) / 0.3)); };
-function drawTitles(t, zoom) {
+function drawTitles(t, follow) {
   const night = nightProgress(t);
   const stage = $('stage').style;
   stage.setProperty('--ink', mix(DAY.ink, NIGHT.ink, smooth(night * 1.5 - 0.25)));
   stage.setProperty('--hot', mix(DAY.hot, NIGHT.hot, smooth(night * 1.5 - 0.25)));
   stage.setProperty('--muted', mix(DAY.muted, NIGHT.muted, smooth(night * 1.5 - 0.25)));
-  const hide = Math.max(smooth(zoom * 2.6), blackout(t));
+  const groupAlpha = 1 - smooth((follow - 0.1) / 0.35);
   for (const title of TITLES) {
     const local = t - title.from, leaving = t - title.until;
-    const visible = local > -0.05 && leaving < 0.5;
+    const visible = local > -0.05 && leaving < 0.5 && groupAlpha > 0.01;
     title.line.style.display = title.sub.style.display = visible ? '' : 'none';
     if (!visible) continue;
-    const groupAlpha = 1 - hide;
-    const lift = -hide * 40;
     title.words.forEach((word, i) => {
       const k = spring(local - i * 0.075, 16, 7.5);
       const out = easeIn((leaving - i * 0.03) / 0.22);
       const scale = Math.max(0, (0.35 + 0.65 * k) * (1 - out * 0.6));
-      const y = (1 - k) * 46 + out * -30 + lift;
       const rot = (1 - k) * (i % 2 ? 9 : -9);
-      word.style.transform = `translateY(${y}px) rotate(${rot}deg) scale(${scale})`;
+      word.style.transform = `translateY(${(1 - k) * 46 + out * -30}px) rotate(${rot}deg) scale(${scale})`;
       word.style.opacity = String(clamp(local / 0.12 - i * 0.5) * (1 - out) * groupAlpha);
     });
     const e = spring(local - title.words.length * 0.075 - 0.08, 14, 6);
     const eOut = easeIn((leaving - 0.08) / 0.22);
     const wiggle = Math.sin((local - 0.4) * 9) * 14 * Math.exp(-Math.max(0, local - 0.4) * 2.2) + Math.sin(local * 2.6) * 6;
-    title.emoji.style.transform = `translateY(${lift}px) rotate(${(1 - e) * -40 + wiggle}deg) scale(${Math.max(0, e * (1 - eOut))})`;
+    title.emoji.style.transform = `rotate(${(1 - e) * -40 + wiggle}deg) scale(${Math.max(0, e * (1 - eOut))})`;
     title.emoji.style.opacity = String(groupAlpha);
     title.path.style.strokeDashoffset = String(title.length * (1 - easeOut((local - 0.35) / 0.45)));
-    title.path.style.opacity = String(1 - easeIn((leaving) / 0.2));
+    title.path.style.opacity = String(1 - easeIn(leaving / 0.2));
     const s = easeOut((local - 0.32) / 0.4), sOut = easeIn(leaving / 0.25);
     title.sub.style.opacity = String(s * (1 - sOut) * groupAlpha);
-    title.sub.firstChild.style.transform = `translateY(${(1 - s) * 24 + sOut * -16 + lift}px)`;
+    title.sub.firstChild.style.transform = `translateY(${(1 - s) * 24 + sOut * -16}px)`;
   }
 }
 
 // ---------------------------------------------------------------------------------------------
-// Camera: the phone floats, swoops in, punches in on moments that matter, and settles for the end.
+// Camera: wide for captions and the finale; otherwise the phone fills the frame and glides to
+// wherever the next step happens. Precomputed with critically damped springs, frame by frame.
 // ---------------------------------------------------------------------------------------------
-let ZOOMS = [];
-function buildZooms() {
-  const rect = (label) => { const r = events.find((e) => e.type === 'focus' && e.label === label)?.rect; return r && [r.x + r.w / 2, r.y + r.h / 2]; };
-  const scoop = rect('scoop'), found = rect('found'), sort = rect('sort'), hats = rect('hats'), save = rect('save'), avatar = rect('avatar');
-  ZOOMS = [
-    { from: 0.3, to: 2.55, zoom: 1.34, focus: [scoop[0] - 80, scoop[1] - 70], target: [600, 1010] },
-    { from: ev('review') + 0.3, to: ev('added') - 0.1, zoom: 1.24, focus: [195, found[1] - 110], target: [540, 980] },
-    { from: at('sort', 'focus') + 0.05, to: at('sort', 'focus') + 2.35, zoom: 1.4, focus: [sort[0] + 60, sort[1] + 40], target: [540, 980] },
-    { from: at('hats', 'focus') - 0.1, to: at('hats', 'focus') + 1.3, zoom: 1.5, focus: [hats[0], hats[1]], target: [540, 1000] },
-    { from: ev('saved') - 0.1, to: ev('saved') + 0.95, zoom: 1.32, focus: [save[0], save[1] - 40], target: [540, 1050] },
-    { from: ev('night') + 1.0, to: footageEnd + 0.1, zoom: 1.32, focus: [avatar[0] - 70, avatar[1] + 90], target: [560, 820] },
-  ].map((z) => ({ ...z, oIn: outAt(z.from), oOut: Math.min(outAt(z.to), footageStop()) }));
-}
-function zoomState(t) {
-  let best = { amount: 0 };
-  for (const z of ZOOMS) {
-    const amount = easeInOut((t - z.oIn) / 0.5) * (1 - easeInOut((t - (z.oOut - 0.5)) / 0.5));
-    if (amount > best.amount) best = { ...z, amount };
-  }
-  return best;
-}
 const local = (x, y) => [25 + x * PT, 25 + (STATUS + y) * PT]; // app point → phone element px
-
+function buildCamera() {
+  const wide = [[0, holdWindows[0][1]], ...holdWindows.slice(1, -1).map(([a, b]) => [a - 0.05, b]), [pauseAt('dark') - 0.05, Infinity]];
+  const isWide = (t) => wide.some(([a, b]) => t >= a && t < b);
+  const points = [
+    ...taps.map((e) => ({ t: e.t, y: e.y })),
+    ...drags.map((e) => ({ t: e.t, y: (e.y + e.y2) / 2 })),
+    ...notes.map((e) => ({ t: e.t, y: e.rect.y + Math.min(e.rect.h, 160) / 2 })),
+  ].map((p) => ({ out: outAt(p.t), y: p.y })).sort((a, b) => a.out - b.out);
+  const followY = (fy) => clamp(1010 - (local(0, fy)[1] - ORIGIN_Y) * FOLLOW, H - ORIGIN_Y * FOLLOW + 4, ORIGIN_Y * FOLLOW - 4);
+  const w = 6.2, dt = 1 / FPS;
+  let focus = 420, y = BASE.y, s = 1, vy = 0, vs = 0;
+  camera = [];
+  for (let n = 0; n < total; n++) {
+    const t = n / FPS;
+    const next = points.find((p) => p.out >= t - 0.35);
+    if (next && next.out <= t + 1.4) focus = next.y;
+    const target = isWide(t) ? { y: BASE.y, s: 1 } : { y: followY(focus), s: FOLLOW };
+    vy += (w * w * (target.y - y) - 2 * w * vy) * dt; y += vy * dt;
+    vs += (w * w * (target.s - s) - 2 * w * vs) * dt; s += vs * dt;
+    camera.push({ y, s, follow: clamp((s - 1) / (FOLLOW - 1)) });
+  }
+}
 function phonePose(t) {
-  let x = BASE.x, y = BASE.y, s = 1, rx = 0, ry = 0, rz = 0;
-  y += Math.sin((t / 4.2) * Math.PI * 2) * 7;
-  rz += Math.sin((t / 5.3) * Math.PI * 2) * 0.55;
-  ry += Math.sin((t / 6.1) * Math.PI * 2 + 1) * 2.4;
-  rx += Math.sin((t / 4.7) * Math.PI * 2 + 2) * 1.5;
+  const cam = camera[clamp(Math.round(t * FPS), 0, total - 1)];
+  let x = BASE.x, y = cam.y, s = cam.s, rx = 0, ry = 0, rz = 0;
+  const idle = 1 - cam.follow; // steady while following the action
+  y += Math.sin((t / 4.2) * Math.PI * 2) * 7 * idle;
+  rz += Math.sin((t / 5.3) * Math.PI * 2) * 0.55 * idle;
+  ry += Math.sin((t / 6.1) * Math.PI * 2 + 1) * 2.4 * idle;
+  rx += Math.sin((t / 4.7) * Math.PI * 2 + 2) * 1.5 * idle;
   // Entrance: springs up from below with a tilt.
   const enter = spring(t - (INTRO - 0.8), 10, 5.5);
   y += (1 - enter) * 1500; rx += (1 - enter) * 26; rz += (1 - enter) * -9; s *= lerp(0.88, 1, clamp(enter));
@@ -331,20 +327,8 @@ function phonePose(t) {
   const hold = holdAmount(t);
   s *= 1 - 0.035 * hold; y += 18 * hold;
   // Each tap gives the phone a tiny squish, as if it felt the finger.
-  for (const tapAt of tapTimes) { const d = t - tapAt; if (d > -0.05 && d < 0.3) s *= 1 - 0.007 * Math.sin(clamp((d + 0.05) / 0.35) * Math.PI); }
-  // Punch-in on the current focus.
-  const z = zoomState(t);
-  let tx = 0, ty = 0;
-  if (z.amount > 0) {
-    const [lx, ly] = local(...z.focus);
-    const rel = [lx - ORIGIN_X, ly - ORIGIN_Y];
-    const s1 = s * (1 + (z.zoom - 1) * z.amount);
-    const start = [x + rel[0] * s, y + rel[1] * s];
-    const want = [lerp(start[0], z.target[0], z.amount), lerp(start[1], z.target[1], z.amount)];
-    tx = want[0] - x - rel[0] * s1; ty = want[1] - y - rel[1] * s1; s = s1;
-    rx *= 1 - z.amount * 0.7; ry *= 1 - z.amount * 0.7; rz *= 1 - z.amount * 0.7;
-  }
-  return { x: x + tx, y: y + ty, s, rx, ry, rz, zoom: z.amount };
+  for (const tapAt of tapTimes) { const d = t - tapAt; if (d > -0.05 && d < 0.3) s *= 1 - 0.006 * idle * Math.sin(clamp((d + 0.05) / 0.35) * Math.PI); }
+  return { x, y, s, rx, ry, rz, follow: cam.follow };
 }
 let phoneMatrix;
 function placePhone(pose) {
@@ -352,8 +336,8 @@ function placePhone(pose) {
   $('phone').style.transform = list;
   phoneMatrix = new DOMMatrix().translate(ORIGIN_X, ORIGIN_Y).multiply(new DOMMatrix(list)).translate(-ORIGIN_X, -ORIGIN_Y);
   const shadow = $('shadow');
-  shadow.style.transform = `translate(${pose.x - 380}px, ${pose.y + ORIGIN_Y * pose.s - 40}px) scale(${pose.s * (1 - pose.zoom * 0.3)})`;
-  shadow.style.opacity = String(clamp(1 - Math.abs(pose.y - BASE.y) / 1400) * (1 - pose.zoom));
+  shadow.style.transform = `translate(${pose.x - 380}px, ${pose.y + ORIGIN_Y * pose.s - 40}px) scale(${pose.s})`;
+  shadow.style.opacity = String(clamp(1 - Math.abs(pose.y - BASE.y) / 1400) * (1 - pose.follow));
 }
 /** Stage position of an app point, through the phone's 3D pose. */
 function project(x, y) {
@@ -395,7 +379,7 @@ function drawFinger(g, s, night) {
   const toPx = (x, y) => [x * SCALE, (y + STATUS) * SCALE];
   for (const tap of taps) {
     const d = s - tap.t, hold = tap.hold / 1000;
-    if (d < -0.14 || d > hold + 0.75) continue;
+    if (d < -0.14 || d > hold + 0.6) continue;
     const [x, y] = toPx(tap.x, tap.y);
     const R = 23 * SCALE;
     if (d < hold + 0.12) {
@@ -407,14 +391,9 @@ function drawFinger(g, s, night) {
     }
     const after = d - hold;
     if (after > 0) {
-      const p = easeOut(after / 0.6);
-      g.globalAlpha = (1 - p) * 0.9; g.lineWidth = 2.6 * SCALE * (1 - p * 0.6); g.strokeStyle = ring;
-      g.beginPath(); g.arc(x, y, R * lerp(0.9, 2.1, p), 0, 6.283); g.stroke();
-      for (let i = 0; i < 5; i++) {
-        const a = (i / 5) * 6.283 + tap.x * 0.05, dist = R * lerp(0.6, 2.4, p);
-        star4(g, x + Math.cos(a) * dist, y + Math.sin(a) * dist, 6.5 * SCALE * (1 - p * 0.7), i % 2 ? ring : '#e0b260', p * 3);
-      }
-      g.globalAlpha = 1;
+      const p = easeOut(after / 0.5);
+      g.globalAlpha = (1 - p) * 0.8; g.lineWidth = 2.6 * SCALE * (1 - p * 0.6); g.strokeStyle = ring;
+      g.beginPath(); g.arc(x, y, R * lerp(0.9, 1.9, p), 0, 6.283); g.stroke(); g.globalAlpha = 1;
     }
   }
   for (const drag of drags) {
@@ -452,7 +431,52 @@ async function drawScreen(s, t) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Foreground effects: a photo dropping in, ingredients bursting out, confetti, hearts, z's.
+// Step labels: what each tap does, and what just happened, right next to it.
+// ---------------------------------------------------------------------------------------------
+let LABELS = [];
+function buildLabels() {
+  const items = events.filter((e) => e.label && (e.type === 'tap' || e.type === 'note')).map((e) => {
+    const tap = e.type === 'tap';
+    const start = outAt(e.t) - (tap ? 0.55 : 0.05);
+    return { text: tap ? e.label : `✓ ${e.label}`, tap, point: tap ? [e.x, e.y] : [e.rect.x + e.rect.w / 2, e.rect.y], start, end: start + (tap ? 2.0 : 2.2) };
+  }).sort((a, b) => a.start - b.start);
+  items.forEach((label, i) => {
+    if (items[i + 1]) label.end = Math.min(label.end, items[i + 1].start - 0.06);
+    const pause = holdWindows.find(([a]) => a > label.start); // a chapter's caption gets the stage to itself
+    if (pause) label.end = Math.min(label.end, pause[0] - 0.08);
+  });
+  LABELS = items;
+}
+function drawLabels(t, dark) {
+  fx.font = '800 50px Nunito'; fx.textAlign = 'center'; fx.textBaseline = 'middle';
+  for (const label of LABELS) {
+    const d = t - label.start, gone = t - label.end;
+    if (d < 0 || gone > 0.22) continue;
+    const k = spring(d, 16, 8), out = easeIn(gone / 0.22);
+    const [px, py] = project(...label.point);
+    const w = fx.measureText(label.text).width + 74, h = 96, gap = label.tap ? 128 : 80;
+    const below = py - gap - h / 2 < 60;
+    const cy = below ? py + gap : py - gap;
+    const cx = clamp(px, w / 2 + 24, W - w / 2 - 24);
+    const bgColor = label.tap ? (dark ? '#fff2e9' : '#3f2c39') : (dark ? '#f3b5cc' : '#b64967');
+    const ink = label.tap ? (dark ? '#3d2133' : '#fff7f1') : (dark ? '#3d2133' : '#fff7f1');
+    fx.save();
+    fx.globalAlpha = clamp(d / 0.12) * (1 - out);
+    fx.translate(cx, cy); fx.scale((0.72 + 0.28 * k) * (1 - 0.12 * out), (0.72 + 0.28 * k) * (1 - 0.12 * out));
+    fx.shadowColor = 'rgba(60, 25, 45, .28)'; fx.shadowBlur = 26; fx.shadowOffsetY = 10;
+    fx.fillStyle = bgColor;
+    fx.beginPath(); fx.roundRect(-w / 2, -h / 2, w, h, h / 2); fx.fill();
+    // A little pointer toward the finger (or the thing that changed).
+    const tipX = clamp(px - cx, -w / 2 + 46, w / 2 - 46), dir = below ? -1 : 1;
+    fx.beginPath(); fx.moveTo(tipX - 18, dir * (h / 2 - 2)); fx.lineTo(tipX, dir * (h / 2 + 18)); fx.lineTo(tipX + 18, dir * (h / 2 - 2)); fx.fill();
+    fx.shadowColor = 'transparent';
+    fx.fillStyle = ink; fx.fillText(label.text, 0, 2);
+    fx.restore();
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Foreground effects: the photo dropping in, confetti for new ideas, hearts for saving, sleepy z's.
 // ---------------------------------------------------------------------------------------------
 const fx = $('fx').getContext('2d');
 let photoImg;
@@ -466,50 +490,24 @@ function burst(ctx, x, y, d, { n = 10, reach = 140, colors = ['#e0b260', '#f08aa
   }
   ctx.globalAlpha = 1;
 }
-const INGREDIENTS = ['🍅', '🧄', '🍋', '🌿', '🍞', '🫒'];
-function drawFx(t, s, pose) {
+function drawFx(t) {
   fx.clearRect(0, 0, W, H);
-  // 1. The grocery photo drops into the phone.
+  // The grocery photo drops into the phone.
   const tp = outAt(ev('photo')) + 0.02, dp = t - tp;
   if (dp > 0 && dp < 1.1) {
     const [ex, ey] = project(195, 330);
     const fly = easeInOut((dp - 0.3) / 0.6), pop = spring(dp, 15, 7);
-    const x = lerp(860, ex, fly) + Math.sin(fly * Math.PI) * 120, y = lerp(1560, ey, fly) - Math.sin(fly * Math.PI) * 160;
+    const x = lerp(820, ex, fly) + Math.sin(fly * Math.PI) * 120, y = lerp(1500, ey, fly) - Math.sin(fly * Math.PI) * 160;
     const sc = lerp(1, 0.22, fly) * (0.6 + 0.4 * pop), rot = lerp(13, -6, fly);
     fx.save(); fx.globalAlpha = 1 - easeIn((dp - 0.82) / 0.1); fx.translate(x, y); fx.rotate(rot * Math.PI / 180); fx.scale(sc, sc);
     fx.shadowColor = 'rgba(90,40,64,.28)'; fx.shadowBlur = 30; fx.shadowOffsetY = 14;
     fx.fillStyle = '#fffdf8'; fx.beginPath(); fx.roundRect(-170, -150, 340, 330, 16); fx.fill(); fx.shadowColor = 'transparent';
     fx.drawImage(photoImg, 280, 0, 840, 840 * 0.82, -150, -130, 300, 246);
-    fx.fillStyle = '#b64967'; fx.font = '800 30px Nunito'; fx.textAlign = 'center'; fx.fillText('today’s shop ♡', 0, 158);
+    fx.fillStyle = '#b64967'; fx.font = '800 30px Nunito'; fx.textAlign = 'center'; fx.textBaseline = 'alphabetic'; fx.fillText('today’s shop ♡', 0, 158);
     fx.restore();
   }
   if (dp > 0.92 && dp < 1.9) { const [ex, ey] = project(195, 330); burst(fx, ex, ey, dp - 0.92, { seed: 3, reach: 160 }); }
-  // 2. What the scan found pops out of the phone and waits above it; adding flies it all back in.
-  const tr = outAt(ev('review')) + 0.45, ta = outAt(ev('added')) - 0.05;
-  if (t > tr && t < ta + 1.2) {
-    INGREDIENTS.forEach((symbol, i) => {
-      const [sx, sy] = project(195, 140);
-      const tx = 175 + i * 146, ty = 185 + (i % 2) * 64;
-      const k = spring(t - tr - i * 0.08, 13, 6.5);
-      const back = easeIn((t - ta - i * 0.07) / 0.45);
-      const [ix, iy] = project(110 + i * 34, 380 + i * 30);
-      let x = lerp(sx, tx, clamp(k, 0, 1.2)), y = lerp(sy, ty, clamp(k, 0, 1.2));
-      y += Math.sin((t - tr) * 3 + i) * 8;
-      x = lerp(x, ix, back); y = lerp(y, iy, back) - Math.sin(back * Math.PI) * 120;
-      const scale = clamp(k * 1.1, 0, 1.15) * (1 - back * 0.75);
-      drawSticker(fx, symbol, 118, x, y, { scale, rot: Math.sin((t - tr) * 2.4 + i * 2) * 10 + (1 - k) * 30, alpha: 1 - easeIn((t - ta - 0.4 - i * 0.07) / 0.12) });
-      if (back > 0.98) burst(fx, ix, iy, t - ta - 0.45 - i * 0.07, { seed: 10 + i, n: 6, reach: 70, size: 12 });
-    });
-  }
-  // 3. Sorting: sparkles from the button, then from the new shelves.
-  const sortTap = taps.find((e) => Math.abs(e.t - at('sort', 'focus')) < 0.05);
-  if (sortTap) {
-    const ts = outAt(sortTap.t + 0.1);
-    const [bx, by] = project(sortTap.x, sortTap.y);
-    burst(fx, bx, by, t - ts, { seed: 21, reach: 120 });
-    burst(fx, bx + 120, by - 60, t - ts - 1.15, { seed: 22, reach: 180, n: 14 });
-  }
-  // 4. Fresh ideas: confetti.
+  // Fresh ideas: confetti.
   const ti = outAt(ev('ideas')) + 0.15, di = t - ti;
   if (di > 0 && di < 2.2) {
     const r = rng(42), [cx, cy] = project(195, 420);
@@ -522,7 +520,7 @@ function drawFx(t, s, pose) {
       fx.restore();
     }
   }
-  // 5. Saved: hearts float up out of the phone.
+  // Saved: hearts float up out of the button.
   const save = events.find((e) => e.type === 'focus' && e.label === 'save')?.rect;
   const th = outAt(ev('saved')) + 0.1, dh = t - th;
   if (save && dh > 0 && dh < 2.2) {
@@ -536,9 +534,8 @@ function drawFx(t, s, pose) {
       heart(fx, x, y, (30 + r() * 30) * lerp(0.5, 1.15, easeOut(p * 3)), ['#f08aa8', '#b64967', '#ffffff', '#ffb3c7'][i % 4]);
     }
     fx.globalAlpha = 1;
-    drawSticker(fx, '💗', 120, hx + 150, hy - 160 - easeOut(dh / 0.6) * 40, { scale: spring(dh, 14, 6) * (1 - easeIn((dh - 1.5) / 0.4)), rot: Math.sin(dh * 6) * 10 });
   }
-  // 6. Night: sleepy z's drift up from the blob in the header.
+  // Night: sleepy z's drift up from the blob in the header.
   const avatar = events.find((e) => e.type === 'focus' && e.label === 'avatar')?.rect;
   const tz = outAt(ev('night')) + 0.7, dz = t - tz;
   if (avatar && dz > 0 && t < footageStop() + 0.4) {
@@ -547,7 +544,7 @@ function drawFx(t, s, pose) {
       const d = (dz - i * 0.42) % 2.5; if (dz - i * 0.42 < 0) continue;
       const p = d / 2.5;
       fx.save(); fx.globalAlpha = Math.sin(p * Math.PI) * (1 - easeIn((t - footageStop()) / 0.4));
-      fx.font = `900 ${lerp(34, 74, p)}px Nunito`; fx.fillStyle = i % 2 ? '#f7b6cd' : '#fff2e9'; fx.textAlign = 'center';
+      fx.font = `900 ${lerp(34, 74, p)}px Nunito`; fx.fillStyle = i % 2 ? '#f7b6cd' : '#fff2e9'; fx.textAlign = 'center'; fx.textBaseline = 'alphabetic';
       fx.translate(ax + 40 + p * 150 + Math.sin(p * 7) * 18, ay - 30 - p * 260); fx.rotate(-0.25 + Math.sin(p * 5) * 0.2);
       fx.fillText(i % 3 === 2 ? 'Z' : 'z', 0, 0); fx.restore();
     }
@@ -559,10 +556,11 @@ function drawFx(t, s, pose) {
 // ---------------------------------------------------------------------------------------------
 let scoopSvg;
 function scoopElement(id, width) {
-  const box = document.createElement('div'); box.id = id; box.className = 'scoop'; box.style.position = 'absolute'; box.style.left = '0'; box.style.top = '0'; box.style.width = `${width}px`; box.style.height = `${width * 170 / 160}px`; box.style.transformOrigin = '50% 100%';
+  const box = document.createElement('div'); box.id = id; box.className = 'scoop'; box.style.position = 'absolute'; box.style.left = '0'; box.style.top = '0';
+  box.style.width = `${width}px`; box.style.height = `${width * 170 / 160}px`; box.style.transformOrigin = '50% 100%';
   box.innerHTML = scoopSvg; return box;
 }
-function poseScoop(box, t, { wave = 0, blink = false } = {}) {
+function poseScoop(box, { wave = 0, blink = false } = {}) {
   box.querySelector('.wave')?.setAttribute('transform', `rotate(${wave} 121 106)`);
   box.querySelector('.eyes')?.setAttribute('transform', blink ? 'translate(0 98) scale(1 .12) translate(0 -98)' : '');
 }
@@ -574,10 +572,8 @@ function textBlock(className, text, top) {
 }
 let intro, outro;
 function buildCards() {
-  const i = $('intro');
   intro = { scoop: scoopElement('scoop-intro', 400), word: textBlock('wordmark', 'Pantry Scoop', 1000), tag: textBlock('tagline', 'your pantry’s tiny chef', 1160) };
-  i.append(intro.scoop, intro.word, intro.tag);
-  const o = $('outro');
+  $('intro').append(intro.scoop, intro.word, intro.tag);
   outro = {
     scoop: scoopElement('scoop-outro', 250),
     word: textBlock('wordmark', 'Pantry Scoop', 476),
@@ -586,11 +582,10 @@ function buildCards() {
     url: textBlock('url', 'open source · github.com/GabrielAgrela/pantry-scoop', 832),
   };
   outro.url.style.cssText += 'font-weight:800;font-size:31px;';
-  o.append(outro.scoop, outro.word, outro.tag, outro.pill, outro.url);
+  $('outro').append(outro.scoop, outro.word, outro.tag, outro.pill, outro.url);
 }
-function drawIntro(t, pose) {
-  const root = $('intro');
-  root.style.display = t < INTRO + 0.2 ? '' : 'none';
+function drawIntro(t) {
+  $('intro').style.display = t < INTRO + 0.2 ? '' : 'none';
   if (t >= INTRO + 0.2) return;
   const land = 0.52, landY = 940;
   const exit = easeInOut((t - 1.95) / 0.55);
@@ -600,7 +595,7 @@ function drawIntro(t, pose) {
   const sc = lerp(1, 0.55, exit);
   intro.scoop.style.transform = `translate(${540 - 200}px, ${y - 425 - exit * 520}px) scale(${sx * sc}, ${sy * sc})`;
   intro.scoop.style.opacity = String(1 - exit);
-  poseScoop(intro.scoop, t, { wave: t > 0.95 && t < 2.2 ? Math.sin((t - 0.95) * 11) * 16 * Math.exp(-(t - 0.95) * 0.9) - 6 : 0, blink: t > 1.9 && t < 2.0 });
+  poseScoop(intro.scoop, { wave: t > 0.95 && t < 2.2 ? Math.sin((t - 0.95) * 11) * 16 * Math.exp(-(t - 0.95) * 0.9) - 6 : 0, blink: t > 1.9 && t < 2.0 });
   [...intro.word.children].forEach((ch, i) => {
     const k = spring(t - 0.72 - i * 0.045, 15, 7);
     ch.style.transform = `translateY(${(1 - k) * 60 - exit * 420}px) rotate(${(1 - k) * (i % 2 ? 12 : -12)}deg) scale(${Math.max(0, k) * lerp(1, 0.7, exit)})`;
@@ -612,12 +607,12 @@ function drawIntro(t, pose) {
   if (t > land && t < land + 1) burst(fx, 540, landY - 30, t - land, { seed: 5, reach: 260, n: 12, size: 22 });
 }
 function drawOutro(t) {
-  const start = footageStop() + 0.15, d = t - start;
+  const d = t - (footageStop() + 0.15);
   $('outro').style.display = d > 0 ? '' : 'none';
   if (d <= 0) return;
   const k = spring(d - 0.2, 12, 6);
   outro.scoop.style.transform = `translate(${540 - 125}px, ${168 + (1 - k) * 80}px) scale(${Math.max(0, k)})`;
-  poseScoop(outro.scoop, t, { wave: Math.sin(d * 7) * 15 - 4, blink: (d % 3.1) > 2.95 });
+  poseScoop(outro.scoop, { wave: Math.sin(d * 7) * 15 - 4, blink: (d % 3.1) > 2.95 });
   [...outro.word.children].forEach((ch, i) => {
     const c = spring(d - 0.5 - i * 0.04, 15, 7);
     ch.style.transform = `translateY(${(1 - c) * 50}px) rotate(${(1 - c) * (i % 2 ? 10 : -10)}deg) scale(${Math.max(0, c)})`;
@@ -627,7 +622,6 @@ function drawOutro(t) {
     const p = easeOut((d - delay) / 0.45);
     el.style.opacity = String(p); el.style.transform = `translateY(${(1 - p) * 28}px)`;
   }
-  // Hearts and sparkles drift around the card.
   // Hearts and sparkles stay in the margins and around Scoop, never on the words.
   const r = rng(99);
   for (let i = 0; i < 14; i++) {
@@ -656,17 +650,13 @@ function buildCues() {
     cue(title.from + title.words.length * 0.075 + 0.08, 'pop');
   }
   for (const [time, name] of [[pauseAt('scan'), 'scan'], [pauseAt('tidy'), 'tidy'], [pauseAt('recipes'), 'recipes'], [outAt(ev('night') + 0.5), 'night']]) cue(time, 'swap', { name });
+  for (const [, end] of holdWindows.slice(0, -1)) cue(end - 0.05, 'zoom'); // the camera moves in
+  for (const label of LABELS) cue(label.start, label.tap ? 'label' : 'sparkle');
   for (const tap of taps) cue(outAt(tap.t), 'tap');
   for (const drag of drags) { const a = outAt(drag.t); cue(a, 'swish', { dur: outAt(drag.t + drag.ms / 1000) - a }); }
   for (const typed of events.filter((e) => e.type === 'type')) [...typed.text].forEach((ch, i) => { if (ch !== ' ') cue(outAt(typed.t + (i * typed.perChar) / 1000), 'tick', { i }); });
-  for (const z of ZOOMS) cue(z.oIn, 'zoom');
   const tp = outAt(ev('photo')) + 0.02;
-  cue(tp + 0.25, 'whoosh', { dur: 0.6 }); cue(tp + 0.92, 'sparkle');
-  const tr = outAt(ev('review')) + 0.45, ta = outAt(ev('added')) - 0.05;
-  INGREDIENTS.forEach((_, i) => cue(tr + i * 0.08, 'pop', { i }));
-  cue(ta + 0.05, 'whoosh', { dur: 0.4 }); cue(ta + 0.45, 'sparkle');
-  const sortTap = taps.find((e) => Math.abs(e.t - at('sort', 'focus')) < 0.05);
-  if (sortTap) { const ts = outAt(sortTap.t + 0.1); cue(ts, 'sparkle'); cue(ts + 1.15, 'magic'); }
+  cue(tp + 0.25, 'whoosh', { dur: 0.6 });
   cue(outAt(ev('ideas')) + 0.15, 'confetti');
   cue(outAt(ev('saved')) + 0.1, 'hearts');
   cue(outAt(ev('night') + 0.12), 'night');
@@ -685,30 +675,35 @@ async function setup() {
   events = cap.events;
   taps = events.filter((e) => e.type === 'tap');
   drags = events.filter((e) => e.type === 'swipe');
+  notes = events.filter((e) => e.type === 'note');
   buildTimeline();
   scoopSvg = (await (await fetch('/app/assets/scoop-guide.svg')).text()).replace(/<style>[\s\S]*?<\/style>/, '');
   photoImg = await createImageBitmap(await (await fetch('/app/assets/pantry-editorial.webp')).blob());
   await Promise.all([document.fonts.load('900 80px Nunito'), document.fonts.load('800 40px Nunito'), document.fonts.load('80px "Noto Color Emoji"', '🍋')]);
   $('phone').style.width = `${PHONE_W}px`; $('phone').style.height = `${PHONE_H}px`;
   tapTimes = taps.map((tap) => outAt(tap.t));
-  buildTitles(); buildZooms(); buildCards();
+  buildTitles(); buildCamera(); buildLabels(); buildCards();
   // Warm the sticker cache so the first frames do not stall.
   for (const set of Object.values(SETS)) SLOTS.forEach(([, , size], i) => sticker(set[i], size));
-  INGREDIENTS.forEach((s) => sticker(s, 118)); sticker('💗', 120);
   await loadFrame(0);
   window.totalFrames = total;
-  window.timeline = { total, intro: INTRO, footageStop: footageStop(), nightStart: outAt(ev('night') + 0.12), cues: buildCues(), outAt: Object.fromEntries(['scan', 'tidy', 'recipes', 'dark'].map((m) => [m, pauseAt(m)])), events: Object.fromEntries(['photo', 'review', 'added', 'thinking', 'ideas', 'saved', 'night'].map((e) => [e, outAt(ev(e))])), taps: taps.map((tap) => outAt(tap.t)), drags: drags.map((d) => outAt(d.t)) };
+  window.timeline = {
+    total, intro: INTRO, footageStop: footageStop(), nightStart: outAt(ev('night') + 0.12), cues: buildCues(),
+    chapters: { onboarding: INTRO - 0.12, ...Object.fromEntries(['scan', 'tidy', 'recipes', 'dark'].map((m) => [m, pauseAt(m)])) },
+    labels: LABELS.map(({ text, start, end }) => ({ text, start, end })),
+  };
 }
 
 window.renderFrame = async (n) => {
   const t = n / FPS, s = srcAt(t);
-  drawBackground(t);
   const pose = phonePose(t);
+  drawBackground(t, pose.follow);
   placePhone(pose);
-  await drawScreen(s, t);
-  drawTitles(t, pose.zoom);
-  drawFx(t, s, pose);
-  drawIntro(t, pose);
+  const dark = await drawScreen(s, t);
+  drawTitles(t, pose.follow);
+  drawFx(t);
+  drawLabels(t, dark);
+  drawIntro(t);
   drawOutro(t);
 };
 window.ready = setup();

@@ -169,6 +169,7 @@ const FX = {
   tap: (c, k) => { const s = sweep(0.09, 520 + (k % 3) * 40, 980, (t) => Math.min(1, t / 0.002) * Math.exp(-42 * t)); place(s, c.t, { gain: 0.16, send: 0.12 }); },
   bloop: (c) => place(kalimba(PENTA[c.i % PENTA.length], 0.5), c.t, { gain: 0.085, pan: -0.1 + (c.i % 5) * 0.05, send: 0.25 }),
   pop: (c, k) => { const s = sweep(0.07, 320 + ((c.i ?? k) % 4) * 60, 1250, (t) => Math.exp(-50 * t)); place(s, c.t, { gain: 0.14, send: 0.15 }); },
+  label: (c, k) => place(sweep(0.08, 760 + (k % 3) * 60, 1180, (t) => Math.min(1, t / 0.003) * Math.exp(-38 * t)), c.t, { gain: 0.07, pan: 0.15, send: 0.2 }),
   tick: (c) => place(bandpass(noise(0.03, 300 + c.i, (t) => Math.exp(-160 * t)), 3200 + (c.i % 4) * 400), c.t, { gain: 0.35, pan: 0.1, send: 0.05 }),
   swish: (c, k) => { const d = Math.max(0.25, c.dur); place(lowpass(noise(d + 0.15, 500 + k, (t) => Math.sin(Math.PI * Math.min(1, t / (d + 0.15))) ** 2), (t) => 900 + 2200 * Math.sin(Math.PI * Math.min(1, t / d))), c.t, { gain: 0.1, pan: -0.2, send: 0.1 }); },
   whoosh: (c, k) => { const d = c.dur ?? 0.6; place(lowpass(noise(d, 700 + k, (t) => Math.sin(Math.PI * t / d) ** 2), (t) => 300 + 3800 * Math.sin(Math.PI * t / d) ** 2), c.t, { gain: 0.22, send: 0.25 }); },
