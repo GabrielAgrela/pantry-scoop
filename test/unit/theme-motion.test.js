@@ -8,17 +8,20 @@ function themePage(width, height, { reduced = false, skipped = false } = {}) {
   const properties = new Map(), classes = new Set(), saved = new Map(), animations = [];
   let onReady, click, finish, capturedName;
   const button = { disabled: false, addEventListener: (_, action) => { click = action; }, setAttribute() {} };
-  const body = { style: { viewTransitionName: '' } };
+  const style = {
+    setProperty: (k, v) => properties.set(k, v),
+    removeProperty: k => { properties.delete(k); if (k === 'view-transition-name') delete style.viewTransitionName; },
+  };
   const root = {
-    dataset: {}, style: { setProperty: (k, v) => properties.set(k, v), removeProperty: k => properties.delete(k) },
+    dataset: {}, style,
     classList: { add: k => classes.add(k), remove: k => classes.delete(k) },
     animate: (frames, timing) => animations.push({ frames, timing }),
   };
   const document = {
-    documentElement: root, body, querySelector: selector => selector === '.theme-toggle' ? button : null,
+    documentElement: root, querySelector: selector => selector === '.theme-toggle' ? button : null,
     addEventListener: (_, action) => { onReady = action; }, dispatchEvent() {},
     startViewTransition(update) {
-      capturedName = body.style.viewTransitionName;
+      capturedName = root.style.viewTransitionName;
       update();
       return { ready: skipped ? Promise.reject(new Error('skipped')) : Promise.resolve(), finished: new Promise(resolve => { finish = resolve; }) };
     },
@@ -30,7 +33,7 @@ function themePage(width, height, { reduced = false, skipped = false } = {}) {
     CustomEvent: class {},
   });
   onReady();
-  return { root, body, button, properties, classes, animations, saved, click: () => click(), finish: () => finish(), captured: () => capturedName };
+  return { root, button, properties, classes, animations, saved, click: () => click(), finish: () => finish(), captured: () => capturedName };
 }
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
 function inside([x, y], polygon) {
@@ -48,8 +51,9 @@ describe('shared theme wave', () => {
     for (const [width, height] of [[360, 800], [800, 360], [1440, 900], [2560, 1440]]) {
       const page = themePage(width, height);
       page.click(); await flush();
-      assert.equal(page.captured(), 'theme-old');
-      assert.equal(page.body.style.viewTransitionName, 'theme-new');
+      assert.equal(page.captured(), undefined, 'old page is captured as the default root');
+      assert.equal(page.root.style.viewTransitionName, 'none', 'new page stays live, not captured');
+      assert.match(page.animations[0].timing.pseudoElement, /\(root\)$/);
       assert.equal(page.animations.length, 2);
       const polygon = [...page.properties.get('--theme-wave-clip').matchAll(/([-\d.]+)px ([-\d.]+)px/g)].map(m => [Number(m[1]), Number(m[2])]);
       const movement = translation(page.animations[0].frames[1]);
@@ -63,7 +67,7 @@ describe('shared theme wave', () => {
       for (const { frames } of page.animations) for (const frame of frames) assert.deepEqual(Object.keys(frame), ['transform']);
       page.finish(); await flush();
       assert.equal(page.button.disabled, false);
-      assert.equal(page.body.style.viewTransitionName, '');
+      assert.equal(page.root.style.viewTransitionName, undefined);
       assert.equal(page.properties.size, 0);
       assert.equal(page.classes.size, 0);
       assert.equal(page.saved.get('pantry-scoop-theme'), 'dark');
@@ -75,7 +79,7 @@ describe('shared theme wave', () => {
     assert.equal(page.root.dataset.theme, 'dark');
     assert.equal(page.animations.length, 0);
     assert.equal(page.button.disabled, false);
-    assert.equal(page.body.style.viewTransitionName, '');
+    assert.equal(page.root.style.viewTransitionName, undefined);
     assert.equal(page.properties.size, 0);
     assert.equal(page.classes.size, 0);
   });

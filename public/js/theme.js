@@ -68,26 +68,26 @@
       if (!document.startViewTransition || matchMedia('(prefers-reduced-motion: reduce)').matches) return setTheme(next);
       const wave = waveGeometry();
       button.disabled = true;
-      const previousName = document.body.style.viewTransitionName;
-      // Separate names give the old clipped snapshot and the new full snapshot their own groups.
-      document.body.style.viewTransitionName = 'theme-old';
       root.style.setProperty('--theme-wave-clip', wave.clip);
       root.classList.add('theme-wave');
+      // Only the old page is captured, as the root so the snapshot keeps the canvas background
+      // (body's background paints there, not in a body snapshot). The new page is not captured:
+      // the live page in the new theme shows underneath while the old snapshot is wiped away.
       const transition = document.startViewTransition(() => {
-        document.body.style.viewTransitionName = 'theme-new';
+        root.style.viewTransitionName = 'none';
         setTheme(next);
       });
       transition.ready.then(() => {
         const timing = { duration: 900, easing: 'cubic-bezier(.45, 0, .2, 1)', fill: 'forwards' };
         root.animate([{ transform: 'translate(0, 0)' }, { transform: `translate(${wave.x}px, ${wave.y}px)` }],
-          { ...timing, pseudoElement: '::view-transition-group(theme-old)' });
+          { ...timing, pseudoElement: '::view-transition-group(root)' });
         root.animate([{ transform: 'translate(0, 0)' }, { transform: `translate(${-wave.x}px, ${-wave.y}px)` }],
-          { ...timing, pseudoElement: '::view-transition-image-pair(theme-old)' });
+          { ...timing, pseudoElement: '::view-transition-image-pair(root)' });
       }).catch(() => {});
       const cleanup = () => {
         root.classList.remove('theme-wave');
         root.style.removeProperty('--theme-wave-clip');
-        document.body.style.viewTransitionName = previousName;
+        root.style.removeProperty('view-transition-name');
         button.disabled = false;
       };
       transition.finished.then(cleanup, cleanup);

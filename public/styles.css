@@ -117,11 +117,8 @@ button.icon:hover { background: var(--icon-hover); }
 .theme-toggle .theme-icon-dark { display: var(--theme-icon-dark); }
 .theme-toggle .theme-icon-light { display: var(--theme-icon-light); }
 /* A fixed wave clips the old theme; opposing transforms move the clip without moving its content. */
-.theme-wave::view-transition-group(root) { display: none; }
-.theme-wave::view-transition-group(theme-old) { animation: none; clip-path: var(--theme-wave-clip); z-index: 2; }
-.theme-wave::view-transition-group(theme-new) { animation: none; z-index: 1; }
-.theme-wave::view-transition-image-pair(theme-old) { isolation: auto; }
-.theme-wave::view-transition-old(theme-old), .theme-wave::view-transition-new(theme-new) { animation: none; mix-blend-mode: normal; }
+.theme-wave::view-transition-group(root) { animation: none; clip-path: var(--theme-wave-clip); }
+.theme-wave::view-transition-old(root) { animation: none; mix-blend-mode: normal; }
 .theme-wave * { transition: none !important; }
 .text-button, button.link { border: 0; background: none; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
 input, select, textarea { color: var(--ink); background: var(--card); border: 1px solid var(--field-line); border-radius: 12px; padding: 12px 14px; width: 100%; min-height: 48px; min-width: 0; font-size: 16px; }
