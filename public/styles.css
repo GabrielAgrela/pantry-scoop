@@ -116,9 +116,13 @@ button.icon:hover { background: var(--icon-hover); }
 .theme-toggle > svg { width: 22px; height: 22px; }
 .theme-toggle .theme-icon-dark { display: var(--theme-icon-dark); }
 .theme-toggle .theme-icon-light { display: var(--theme-icon-light); }
-/* theme.js drives the wave clip-path on the new snapshot; keep the old one still underneath. */
-.theme-wave::view-transition-old(root), .theme-wave::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
-.theme-wave::view-transition-new(root) { z-index: 1; }
+/* A fixed wave clips the old theme; opposing transforms move the clip without moving its content. */
+.theme-wave::view-transition-group(root) { display: none; }
+.theme-wave::view-transition-group(theme-old) { animation: none; clip-path: var(--theme-wave-clip); z-index: 2; }
+.theme-wave::view-transition-group(theme-new) { animation: none; z-index: 1; }
+.theme-wave::view-transition-image-pair(theme-old) { isolation: auto; }
+.theme-wave::view-transition-old(theme-old), .theme-wave::view-transition-new(theme-new) { animation: none; mix-blend-mode: normal; }
+.theme-wave * { transition: none !important; }
 .text-button, button.link { border: 0; background: none; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
 input, select, textarea { color: var(--ink); background: var(--card); border: 1px solid var(--field-line); border-radius: 12px; padding: 12px 14px; width: 100%; min-height: 48px; min-width: 0; font-size: 16px; }
 input::placeholder, textarea::placeholder { color: var(--placeholder); opacity: 1; }
@@ -630,8 +634,10 @@ h3 { letter-spacing: -.4px; }
 .tabbar button[aria-current='page'] { color: var(--accent); }
 @media (hover: hover) and (pointer: fine) { .tabbar button:not([aria-current]):hover { color: var(--accent); } }
 /* The highlight behind the current tab; main.js moves it with the pages as they slide. */
-.tab-indicator { position: absolute; top: 0; left: 0; border-radius: 18px; background: var(--rose); pointer-events: none; will-change: transform, width; }
+.tab-indicator { position: absolute; top: 0; left: 0; border-radius: 18px; background: var(--rose); pointer-events: none; transform-origin: 0 0; will-change: transform; }
 .page > .view { will-change: transform, opacity; }
+/* Adjacent pages stay mounted for swiping, but their decorative motion only runs in view. */
+.page[data-in-viewport='false'] *, .page[data-in-viewport='false'] *::before, .page[data-in-viewport='false'] *::after { animation-play-state: paused !important; }
 .nav-emoji { display: inline-block; font-size: 22px; line-height: 1.2; }
 .tabbar button[aria-current='page'] .nav-emoji { animation: soft-pop .45s ease both; }
 .emoji { display: inline-block; font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif; font-style: normal; font-weight: 400; }

@@ -18,31 +18,29 @@
     if (button) button.setAttribute('aria-label', isDark() ? 'Switch to light theme' : 'Switch to dark theme');
   }
 
-  // A rippling wave front, perpendicular to the screen diagonal, that sweeps the new theme in
-  // from the top-left corner to the bottom-right. Returns clip-path keyframes for the new snapshot.
-  function waveFrames() {
+  // Clip the old snapshot once, then move that clip across the screen. Counter-translating
+  // its contents keeps the page still while the new snapshot appears underneath. Only transforms
+  // animate: a changing full-screen polygon otherwise needs new clipping work on every frame.
+  function waveGeometry() {
     const w = innerWidth, h = innerHeight, len = Math.hypot(w, h);
     const nx = h / len, ny = w / len; // unit normal of the front, pointing towards bottom-right
     const tx = -ny, ty = nx;          // unit tangent along the front
     const amp = Math.min(w, h) * 0.04 + 12, k = (2 * Math.PI) / Math.max(180, len / 5);
     // The front only needs to span the screen's projection onto it, plus room for the swell.
     const from = -(w * w) / len - amp * 2, to = (h * h) / len + amp * 2;
-    const points = Math.ceil((to - from) / 10), frames = 36, behind = len * 2;
-    const start = -amp * 2, travel = (2 * w * h) / len + amp * 4; // fully hidden at 0, fully covering at 1
-    return Array.from({ length: frames + 1 }, (_, f) => {
-      const p = f / frames;
-      const r = start + travel * p;
-      const swell = amp * (Math.sin(Math.PI * p) + 0.35); // calm at the corners, tallest mid-screen
-      const phase = p * Math.PI * 3;
-      const edge = Array.from({ length: points + 1 }, (_, i) => {
-        const s = from + ((to - from) * i) / points;
-        const d = r + swell * (Math.sin(k * s + phase) + 0.35 * Math.sin(2.3 * k * s - 1.7 * phase));
-        return [nx * d + tx * s, ny * d + ty * s];
-      });
-      const [first, last] = [edge[0], edge[points]];
-      edge.push([last[0] - nx * behind, last[1] - ny * behind], [first[0] - nx * behind, first[1] - ny * behind]);
-      return { clipPath: `polygon(${edge.map(([x, y]) => `${x.toFixed(1)}px ${y.toFixed(1)}px`).join(',')})` };
+    const points = Math.ceil((to - from) / 10), ahead = len * 2;
+    const start = -amp * 2, travel = (2 * w * h) / len + amp * 4; // old theme fully covers at 0, fully clears at 1
+    const edge = Array.from({ length: points + 1 }, (_, i) => {
+      const s = from + ((to - from) * i) / points;
+      const d = start + amp * (Math.sin(k * s) + 0.35 * Math.sin(2.3 * k * s));
+      return [nx * d + tx * s, ny * d + ty * s];
     });
+    const [first, last] = [edge[0], edge[points]];
+    edge.push([last[0] + nx * ahead, last[1] + ny * ahead], [first[0] + nx * ahead, first[1] + ny * ahead]);
+    return {
+      clip: `polygon(${edge.map(([x, y]) => `${x.toFixed(1)}px ${y.toFixed(1)}px`).join(',')})`,
+      x: nx * travel, y: ny * travel,
+    };
   }
 
   function setTheme(next) {
@@ -63,16 +61,36 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => {
-    document.querySelector('.theme-toggle')?.addEventListener('click', () => {
+    const button = document.querySelector('.theme-toggle');
+    button?.addEventListener('click', () => {
       const next = isDark() ? 'light' : 'dark';
       popIcon(next === 'dark');
       if (!document.startViewTransition || matchMedia('(prefers-reduced-motion: reduce)').matches) return setTheme(next);
+      const wave = waveGeometry();
+      button.disabled = true;
+      const previousName = document.body.style.viewTransitionName;
+      // Separate names give the old clipped snapshot and the new full snapshot their own groups.
+      document.body.style.viewTransitionName = 'theme-old';
+      root.style.setProperty('--theme-wave-clip', wave.clip);
       root.classList.add('theme-wave');
-      const transition = document.startViewTransition(() => setTheme(next));
-      transition.ready.then(() => root.animate(waveFrames(), {
-        duration: 900, easing: 'cubic-bezier(.45, 0, .2, 1)', pseudoElement: '::view-transition-new(root)',
-      })).catch(() => {});
-      transition.finished.finally(() => root.classList.remove('theme-wave'));
+      const transition = document.startViewTransition(() => {
+        document.body.style.viewTransitionName = 'theme-new';
+        setTheme(next);
+      });
+      transition.ready.then(() => {
+        const timing = { duration: 900, easing: 'cubic-bezier(.45, 0, .2, 1)', fill: 'forwards' };
+        root.animate([{ transform: 'translate(0, 0)' }, { transform: `translate(${wave.x}px, ${wave.y}px)` }],
+          { ...timing, pseudoElement: '::view-transition-group(theme-old)' });
+        root.animate([{ transform: 'translate(0, 0)' }, { transform: `translate(${-wave.x}px, ${-wave.y}px)` }],
+          { ...timing, pseudoElement: '::view-transition-image-pair(theme-old)' });
+      }).catch(() => {});
+      const cleanup = () => {
+        root.classList.remove('theme-wave');
+        root.style.removeProperty('--theme-wave-clip');
+        document.body.style.viewTransitionName = previousName;
+        button.disabled = false;
+      };
+      transition.finished.then(cleanup, cleanup);
     });
     sync();
   });

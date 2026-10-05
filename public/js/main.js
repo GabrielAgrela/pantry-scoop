@@ -26,6 +26,18 @@ let settleTimer;
 let frame;
 const loaded = new Set();
 const indicator = document.querySelector('.tab-indicator');
+let slideLayout;
+
+// Tab positions only change when the navigation resizes, not while a finger moves the pager.
+function measureSlide() {
+  return {
+    width: pager.clientWidth || 1,
+    tabs: PAGES.map((name) => {
+      const tab = tabbar.querySelector(`[data-tab="${name}"]`);
+      return { width: tab.offsetWidth, height: tab.offsetHeight, left: tab.offsetLeft, top: tab.offsetTop };
+    }),
+  };
+}
 
 function load(name) {
   loaded.add(name);
@@ -66,19 +78,23 @@ function activate(name, { scroll = 'smooth' } = {}) {
 function paintSlide() {
   frame = 0;
   if (!signedIn) return;
-  const position = Math.min(PAGES.length - 1, Math.max(0, pager.scrollLeft / (pager.clientWidth || 1)));
-  const tabs = PAGES.map((name) => tabbar.querySelector(`[data-tab="${name}"]`));
+  const { width, tabs } = slideLayout ??= measureSlide();
+  const position = Math.min(PAGES.length - 1, Math.max(0, pager.scrollLeft / width));
   const from = tabs[Math.floor(position)], to = tabs[Math.ceil(position)], t = position - Math.floor(position);
   const mix = (a, b) => a + (b - a) * t;
-  indicator.style.width = `${mix(from.offsetWidth, to.offsetWidth)}px`;
-  indicator.style.height = `${from.offsetHeight}px`;
-  indicator.style.transform = `translate(${mix(from.offsetLeft, to.offsetLeft)}px, ${from.offsetTop}px)`;
   const still = calm();
+  // Read all page geometry before writing styles. Interleaving these phases forces layout
+  // repeatedly during a swipe, even when the animated property itself is a transform.
+  const pages = PAGES.map((name, i) => {
+    const page = pageOf(name), away = still ? 0 : Math.min(1, Math.abs(i - position));
+    return { view: page.firstElementChild, away, origin: away ? `50% ${page.scrollTop + page.clientHeight * 0.4}px` : '' };
+  });
+  indicator.style.width = `${tabs[0].width}px`;
+  indicator.style.height = `${tabs[0].height}px`;
+  indicator.style.transform = `translate(${mix(from.left, to.left)}px, ${mix(from.top, to.top)}px) scale(${mix(from.width, to.width) / (tabs[0].width || 1)}, ${mix(from.height, to.height) / (tabs[0].height || 1)})`;
   // The view inside each page moves, never the page: snapping measures the page's transformed box.
-  PAGES.forEach((name, i) => {
-    const away = still ? 0 : Math.min(1, Math.abs(i - position));
-    const page = pageOf(name), view = page.firstElementChild;
-    view.style.transformOrigin = away ? `50% ${page.scrollTop + page.clientHeight * 0.4}px` : '';
+  pages.forEach(({ view, away, origin }) => {
+    view.style.transformOrigin = origin;
     view.style.transform = away ? `scale(${1 - 0.07 * away})` : '';
     view.style.opacity = away ? String(1 - 0.45 * away) : '';
   });
@@ -92,6 +108,16 @@ function paintSlide() {
 }
 
 const requestPaint = () => { frame ||= requestAnimationFrame(paintSlide); };
+
+const pageVisibility = new IntersectionObserver((entries) => {
+  for (const { target, isIntersecting, intersectionRect } of entries) {
+    target.dataset.inViewport = String(isIntersecting && intersectionRect.width > 1);
+  }
+}, { root: pager, threshold: [0, 0.01] });
+for (const name of PAGES) pageVisibility.observe(pageOf(name));
+const navigationSize = new ResizeObserver(() => { slideLayout = undefined; requestPaint(); });
+navigationSize.observe(tabbar);
+for (const tab of tabbar.querySelectorAll('[data-tab]')) navigationSize.observe(tab);
 
 /** The page under the finger lights its tab at once and becomes current when the scroll comes to rest. */
 function onPagerScroll() {
@@ -166,6 +192,7 @@ let pagerWidth = 0;
 if (typeof ResizeObserver === 'function') new ResizeObserver(() => {
   if (!signedIn || pager.clientWidth === pagerWidth) return;
   pagerWidth = pager.clientWidth;
+  slideLayout = undefined;
   pager.scrollTo?.({ left: PAGES.indexOf(current) * pagerWidth, behavior: 'instant' });
   paintSlide();
 }).observe(pager);
