@@ -1,5 +1,6 @@
 import { api } from '../api.js';
-import { h } from '../dom.js';
+import { h, showError, withBusy } from '../dom.js';
+import { platform } from '../platform.js';
 import { isOnServerMachine, startOnServerMachine, startUrl } from '../sign-in.js';
 import { emoji, icon, pantryFriend } from '../ui.js';
 
@@ -7,7 +8,7 @@ import { emoji, icon, pantryFriend } from '../ui.js';
  * Sign-in screen. With `consent`, it re-runs sign-in asking ChatGPT to show the permission
  * screen again, for users who signed in without allowing plan usage.
  */
-export function createLoginView(root, { onSignedIn, consent = false, mode = 'local', google = false }) {
+export function createLoginView(root, { onSignedIn, consent = false, mode = 'local', google = false, providerOnly }) {
   const pasteInput = h('input', { type: 'text', inputmode: 'url', autocomplete: 'off', autocapitalize: 'off', spellcheck: false, placeholder: 'http://127.0.0.1:…/auth/callback?code=…', 'aria-label': 'Address from the ChatGPT tab' });
   const finish = h('button', { type: 'submit', class: 'primary' }, 'Finish signing in');
   const problem = h('p', { class: 'problem', role: 'alert', hidden: true });
@@ -46,6 +47,7 @@ export function createLoginView(root, { onSignedIn, consent = false, mode = 'loc
     finish,
   );
 
+
   const login = h('div', { class: 'login stack' });
   root.append(
     h('div', { class: 'login-hero' },
@@ -62,6 +64,21 @@ export function createLoginView(root, { onSignedIn, consent = false, mode = 'loc
         h('span', { class: 'illustration-note' }, 'a happy little pantry'))),
   );
 
+  if (platform.native) {
+    const button = (provider, label, consent) => {
+      const el = h('button', { class: 'primary', onclick: () => withBusy(el, 'Opening sign-in…', () => platform.signIn({ provider, consent })) }, label);
+      return el;
+    };
+    if (google && !consent) login.append(button('google', 'Continue with Google'));
+    login.append(button('chatgpt', 'Continue with ChatGPT', consent),
+      h('p', { class: 'muted' }, google && !consent
+        ? 'Google signs in here. ChatGPT opens a secure browser to connect your plan.'
+        : 'Connect your ChatGPT plan in a secure browser, then return to Pantry Scoop.'),
+      h('button', { onclick: () => platform.signIn({ provider: 'pair' }).catch(showError) }, 'Use a phone sign-in link'));
+    return;
+  }
+
+
   // Google returns to this site's public address, so it is one tap on every device.
   if (google && !consent) {
     login.append(
@@ -70,6 +87,7 @@ export function createLoginView(root, { onSignedIn, consent = false, mode = 'loc
       h('div', { class: 'login-or', 'aria-hidden': 'true' }, 'or'),
     );
   }
+  if (providerOnly === 'google') return;
 
   // A registered website client (or the server's own machine) gets the normal one-tap sign-in.
   if (mode === 'registered' || isOnServerMachine()) {

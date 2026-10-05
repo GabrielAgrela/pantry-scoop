@@ -3,6 +3,7 @@ import { scanReviewList } from '../scan-review.js';
 import { h, openDialog, showError, toast, withBusy } from '../dom.js';
 import { categoryLabel, SHELVES, SHELF_EMOJIS, shelvesFor } from '../categories.js';
 import { photoToDataUrl } from '../images.js';
+import { platform } from '../platform.js';
 import { smoothDetails } from '../smooth-details.js';
 import { hideReady, showReady } from '../ready-notice.js';
 import { latestJob, watchJob } from '../jobs.js';
@@ -94,14 +95,32 @@ export function createStockView(root) {
       h('div', { class: 'row' }, h('h3', {}, 'Scan groceries'), h('button', { class: 'icon push-right', 'aria-label': 'Close', onclick: () => close() }, icon('close'))),
       h('p', { class: 'muted' }, 'Photograph your fridge, pantry or shopping bags.'),
       h('div', { class: 'scan-source-art', 'aria-hidden': 'true' }, pantryFriend(), emoji('📷')),
-      h('button', { class: 'primary', onclick: () => { close(); cameraInput.click(); } }, icon('camera'), 'Take a photo'),
-      h('button', { onclick: () => { close(); uploadInput.click(); } }, icon('image'), 'Choose photos'),
+      h('button', { class: 'primary', onclick: () => { close(); choosePhotos('camera'); } }, icon('camera'), 'Take a photo'),
+      h('button', { onclick: () => { close(); choosePhotos('gallery'); } }, icon('image'), 'Choose photos'),
       h('p', { class: 'muted' }, 'Up to 6 photos. Review the ingredients before adding them.'));
   }
+
+  async function choosePhotos(source) {
+    if (!platform.native) { (source === 'camera' ? cameraInput : uploadInput).click(); return; }
+    try {
+      await processPhotos(await platform.pickPhotos(source, MAX_PHOTOS - (appendToJob?.request.photos ?? 0), appendToJob?.id));
+    } catch (error) { showError(error); }
+  }
+
+  if (platform.native) window.addEventListener('pantry:restored-photos', async ({ detail }) => {
+    try {
+      appendToJob = detail.jobId ? (await api.getJob(detail.jobId)).job : undefined;
+      await processPhotos(detail.files);
+    } catch (error) { showError(error); }
+  });
 
   async function onPhotos(event) {
     const files = [...event.target.files];
     event.target.value = '';
+    await processPhotos(files);
+  }
+
+  async function processPhotos(files) {
     if (!files.length) return;
     const remaining = MAX_PHOTOS - (appendToJob?.request.photos ?? 0);
     if (files.length > remaining) { showError(new Error(`Choose up to ${remaining} more photo${remaining === 1 ? '' : 's'} for this scan.`)); return; }

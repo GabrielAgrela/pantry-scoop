@@ -1,10 +1,17 @@
+import { platform } from './platform.js';
+
 /**
  * "Sign in with ChatGPT" for open-source apps must return to http://127.0.0.1:<port>/auth/callback.
  * On the server's own machine that lands straight back here. On any other device (a phone on
  * the same Wi-Fi) that address can't load, so the user copies it and pastes it into this app.
  */
 export function isOnServerMachine() {
-  return location.hostname === '127.0.0.1' || location.hostname === 'localhost' || location.hostname === '[::1]';
+  return !platform.native && (location.hostname === '127.0.0.1' || location.hostname === 'localhost' || location.hostname === '[::1]');
+}
+
+export function signInWithGoogle() {
+  if (platform.native) return platform.signIn({ provider: 'google' });
+  location.href = '/auth/google/start';
 }
 
 export function startUrl({ consent = false } = {}) {

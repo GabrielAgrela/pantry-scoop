@@ -1,4 +1,5 @@
 import { api } from './api.js';
+import { signInWithGoogle } from './sign-in.js';
 import { blobBuddy, feel } from './blob-buddy.js';
 import { calmMotion, h, MANAGE_USAGE_URL, openDialog, showError, toast } from './dom.js';
 import { icon, pantryFriend } from './ui.js';
@@ -90,7 +91,7 @@ export function renderAccount(root, account, { mode, onSignedOut, onEnablePlan, 
     linkSection.replaceChildren(
       h('span', { class: 'muted menu-label' }, 'Sign in with'),
       providerRow('ChatGPT', view.chatgpt, onEnablePlan, 'chatgpt'),
-      view.googleAvailable || view.google ? providerRow('Google', view.google, () => { location.href = '/auth/google/start'; }, 'google') : '',
+      view.googleAvailable || view.google ? providerRow('Google', view.google, signInWithGoogle, 'google') : '',
     );
     linkSection.hidden = false;
   };

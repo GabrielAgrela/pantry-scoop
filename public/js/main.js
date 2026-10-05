@@ -5,6 +5,7 @@ import { createProfileView } from './views/profile.js';
 import { createRecipesView } from './views/recipes.js';
 import { createStockView } from './views/stock.js';
 import { h } from './dom.js';
+import { platform } from './platform.js';
 
 const loginRoot = document.getElementById('view-login');
 const accountRoot = document.getElementById('account');
@@ -112,7 +113,7 @@ function settle() {
   else markTab(current);
 }
 
-function showLogin({ consent = false } = {}) {
+function showLogin({ consent = false, providerOnly } = {}) {
   views?.stock.hide();
   views?.recipes.stop();
   loading.hidden = true;
@@ -124,7 +125,7 @@ function showLogin({ consent = false } = {}) {
   tabbar.hidden = true;
   accountRoot.replaceChildren();
   loginRoot.replaceChildren();
-  createLoginView(loginRoot, { consent, mode, google, onSignedIn: () => location.reload() });
+  createLoginView(loginRoot, { consent, mode, providerOnly, google: providerOnly !== 'chatgpt' && google, onSignedIn: () => location.reload() });
   loginRoot.hidden = false;
 }
 
@@ -191,11 +192,20 @@ async function consumeDeviceLink() {
 }
 
 try {
-  ({ mode, google = false } = await api.getAuthConfig());
-  await consumeDeviceLink();
-  const account = await api.getAccount();
-  const { profile } = await api.getProfile();
-  showApp(account, profile);
+  const config = await api.getAuthConfig();
+  ({ mode, google = false } = config);
+  if (!platform.native && config.mobilePending && !config.mobileAuthenticated) {
+    showLogin({ consent: config.mobileConsent, providerOnly: config.mobileProvider });
+  } else {
+    await consumeDeviceLink();
+    const account = await api.getAccount();
+    if (!platform.native && config.mobilePending) {
+      location.replace('/auth/mobile/finish');
+    } else {
+      const { profile } = await api.getProfile();
+      showApp(account, profile);
+    }
+  }
 } catch (error) {
   if (error.code !== 'auth-required') {
     loading.hidden = true;

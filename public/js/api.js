@@ -1,3 +1,5 @@
+import { platform } from './platform.js';
+
 /** Error from the API, carrying the server's machine-readable `code` (e.g. "usage-limit"). */
 export class ApiError extends Error {
   constructor(message, { status, code, manageUsageUrl } = {}) {
@@ -14,7 +16,7 @@ export const PANTRY_CHANGED_EVENT = 'pantry:stock-changed';
 
 /** Single place that knows the HTTP API's shape. */
 async function request(method, url, body, { keepalive = false } = {}) {
-  const response = await fetch(url, {
+  const response = await platform.request(url, {
     method,
     headers: body === undefined ? {} : { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -47,7 +49,11 @@ export const api = {
   completeSignIn: (callbackUrl) => request('POST', '/api/auth/complete', { callbackUrl }),
   createDeviceLink: () => request('POST', '/api/account/device-links'),
   signInWithDeviceLink: (token) => request('POST', '/api/auth/device-link', { token }),
-  signOut: () => request('POST', '/api/auth/sign-out'),
+  signOut: async () => {
+    const result = await request('POST', '/api/auth/sign-out');
+    await platform.signOut();
+    return result;
+  },
   deleteAccount: () => request('DELETE', '/api/account'),
   getConnections: () => request('GET', '/api/connections'),
   setAi: (provider) => request('PUT', '/api/connections/ai', { provider }),

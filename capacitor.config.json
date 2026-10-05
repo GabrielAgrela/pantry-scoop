@@ -1,0 +1,8 @@
+{
+  "appId": "xyz.gabruel.pantryscoop",
+  "appName": "Pantry Scoop",
+  "loggingBehavior": "none",
+  "webDir": "dist/mobile",
+  "android": { "allowMixedContent": false },
+  "plugins": { "SplashScreen": { "launchAutoHide": true } }
+}

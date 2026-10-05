@@ -3,6 +3,8 @@ import { AuthService, SignInRetryError, type AppSession, type CompletedSignIn } 
 import { DomainError } from '../../domain/errors.ts';
 import { COOKIES, cookieOptions, isLoopback } from '../cookies.ts';
 import { bodyObject } from '../params.ts';
+import { MobileSignIns } from '../../application/mobile-sign-ins.ts';
+import { mobileAuthRoutes } from './mobile-auth.ts';
 
 const SIGN_IN_COOKIE_SECONDS = 10 * 60;
 const ACCOUNT_HINT_SECONDS = 365 * 24 * 60 * 60;
@@ -14,6 +16,7 @@ const RETRY_CLIENT_SECONDS = 24 * 60 * 60;
  *        browser cookie comes back with the callback.
  */
 export function authRoutes(auth: AuthService, strictLimit: number, publicUrl?: string): FastifyPluginAsync {
+  const mobile = new MobileSignIns();
   const limited = { config: { rateLimit: { max: strictLimit, timeWindow: '1 minute' } } };
   const startSession = (request: FastifyRequest, reply: FastifyReply, session: AppSession) => {
     const sessionSeconds = Math.floor((session.sessionExpiresAt - Date.now()) / 1000);
@@ -26,7 +29,13 @@ export function authRoutes(auth: AuthService, strictLimit: number, publicUrl?: s
     reply.clearCookie(COOKIES.retryClient, { path: '/' });
   };
   /** A signed-in browser that starts a sign-in is connecting another provider to its account. */
-  const signedInUserId = (request: FastifyRequest) => auth.userForSession(request.cookies[COOKIES.session])?.id;
+  const signedInUserId = (request: FastifyRequest) => request.cookies[COOKIES.mobile]
+    ? mobile.get(request.cookies[COOKIES.mobile]).linkUserId
+    : auth.userForSession(request.cookies[COOKIES.session])?.id;
+  const returnPath = (request: FastifyRequest) => request.cookies[COOKIES.mobile] ? '/auth/mobile/finish' : '/';
+  const finishMobile = (request: FastifyRequest, userId: number, provider: 'google' | 'chatgpt') => {
+    if (request.cookies[COOKIES.mobile]) mobile.authenticated(request.cookies[COOKIES.mobile], userId, provider);
+  };
   const rememberRetry = (request: FastifyRequest, reply: FastifyReply, error: unknown) => {
     if (error instanceof SignInRetryError) {
       reply.setCookie(COOKIES.retryClient, error.issuedClientId, cookieOptions(request, RETRY_CLIENT_SECONDS));
@@ -34,8 +43,19 @@ export function authRoutes(auth: AuthService, strictLimit: number, publicUrl?: s
   };
 
   return async (app) => {
+    await app.register(mobileAuthRoutes(auth, mobile, limited, startSession));
     /** Lets the front-end pick the right sign-in screen. */
-    app.get('/api/auth/config', async () => ({ mode: auth.mode, google: auth.googleEnabled }));
+    app.get('/api/auth/config', async (request, reply) => {
+      let handoff;
+      if (request.cookies[COOKIES.mobile]) {
+        try {
+          const item = mobile.get(request.cookies[COOKIES.mobile]);
+          handoff = { mobilePending: true, mobileAuthenticated: item.userId !== undefined, mobileConsent: item.consent, mobileProvider: item.provider };
+        }
+        catch { reply.clearCookie(COOKIES.mobile, { path: '/' }); }
+      }
+      return { mode: auth.mode, google: auth.googleEnabled, ...handoff };
+    });
 
     /** Starts "Continue with ChatGPT": remembers this browser, then redirects to OpenAI. */
     app.get('/auth/chatgpt/start', limited, async (request, reply) => {
@@ -67,8 +87,9 @@ export function authRoutes(auth: AuthService, strictLimit: number, publicUrl?: s
           // would look like loopback, so the binding cookie is always required.
           trustedWithoutBinding: auth.mode === 'local' && bindingToken === undefined && isLoopback(request.ip),
         });
+        finishMobile(request, done.user.id, 'chatgpt');
         establish(request, reply, done);
-        return reply.redirect('/');
+        return reply.redirect(returnPath(request));
       } catch (error) {
         if (!(error instanceof DomainError)) throw error;
         rememberRetry(request, reply, error);
@@ -94,9 +115,10 @@ export function authRoutes(auth: AuthService, strictLimit: number, publicUrl?: s
       const params = new URLSearchParams(request.url.split('?')[1] ?? '');
       try {
         const session = await auth.completeGoogleSignIn({ params, bindingToken: request.cookies[COOKIES.signIn] });
+        finishMobile(request, session.user.id, 'google');
         startSession(request, reply, session);
         reply.clearCookie(COOKIES.signIn, { path: '/' });
-        return reply.redirect('/');
+        return reply.redirect(returnPath(request));
       } catch (error) {
         if (!(error instanceof DomainError)) throw error;
         request.log.warn({ reason: error.message }, 'Google sign-in failed');
@@ -117,6 +139,7 @@ export function authRoutes(auth: AuthService, strictLimit: number, publicUrl?: s
           rememberRetry(request, reply, error);
           throw error;
         });
+      finishMobile(request, done.user.id, 'chatgpt');
       establish(request, reply, done);
       return { ok: true, planUsageEnabled: done.planUsageEnabled };
     });
