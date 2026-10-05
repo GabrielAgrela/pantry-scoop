@@ -9,6 +9,14 @@ ctx.db.prepare("INSERT INTO sqlite_sequence(name,seq) VALUES ('jobs',?)").run(Da
 const app=await buildApp(ctx.container,{publicDir:fileURLToPath(new URL('../public',import.meta.url))});
 let cookie;
 app.get('/qa-session',async(req,reply)=>reply.setCookie('ps_session',cookie,{httpOnly:true,sameSite:'lax',path:'/'}).redirect('/'));
+app.get('/qa-mobile-return',async(req,reply)=>{
+  const { sha256 } = await import('../src/application/crypto.ts');
+  const start = await app.inject({method:'POST',url:'/api/auth/mobile/start',payload:{challenge:sha256('qa-only-mobile-sign-in-verifier-with-43-characters'),provider:'google'}});
+  const flow = start.json().flow;
+  const oauth = await app.inject({url:'/auth/google/start',cookies:{ps_mobile:flow}});
+  const done = await app.inject({url:'/auth/google/callback?'+ctx.google.callbackParams(),cookies:{ps_mobile:flow,ps_signin:oauth.cookies.find(c=>c.name==='ps_signin').value}});
+  return reply.setCookie('ps_mobile',flow,{httpOnly:true,sameSite:'lax',path:'/'}).setCookie('ps_session',done.cookies.find(c=>c.name==='ps_session').value,{httpOnly:true,sameSite:'lax',path:'/'}).redirect('/auth/mobile/finish');
+});
 app.get('/qa-scan-matches',async(req,reply)=>{services.stock.addIfMissing({name:'Óleo alimentar',category:'condiments',notes:'',source:'manual'});ctx.detector.answer=[{name:'Azeite',category:'condiments'},{name:'Óleo alimentar',category:'condiments'}];await app.inject({method:'POST',url:'/api/scan',cookies:{ps_session:cookie},payload:{images:[TINY_JPEG_DATA_URL]}});return reply.redirect('/#stock');});
 app.get('/qa-scan',async(req,reply)=>{await app.inject({method:'POST',url:'/api/scan',cookies:{ps_session:cookie},payload:{images:[TINY_JPEG_DATA_URL]}});return reply.redirect('/#stock');});
 app.get('/qa-classification-error',async(req,reply)=>{ctx.classifier.answer=new UsageLimitError('Your ChatGPT plan has reached its usage limit. Check your usage or try again later.');return reply.redirect('/#stock');});
