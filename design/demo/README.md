@@ -9,3 +9,5 @@ Recording: attached the current task to the host Codex desktop, captured its liv
 Source footage: `pantry-scoop-mobile-live.mp4` and `mobile-details-live.mp4`. `live-edit.json` records the cuts. `demo-server.mjs` starts the sample app at localhost:3214.
 
 Validation: inspected phone UI interactions in the built-in Browser, reviewed actual video frame contact sheets, confirmed 55.07-second duration and 1652 frames with ffprobe, and decoded the full final video without errors.
+
+A newer 47-second promo with a designed edit and a synthesised soundtrack is in [promo/](promo/README.md).
