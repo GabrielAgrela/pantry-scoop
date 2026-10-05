@@ -9,14 +9,6 @@
   #stage { position: relative; width: 1080px; height: 1920px; overflow: hidden; font-family: 'Nunito', sans-serif; }
   canvas.layer { position: absolute; left: 0; top: 0; width: 1080px; height: 1920px; }
   .copy { position: absolute; left: 0; right: 0; text-align: center; white-space: nowrap; }
-  .title { top: 132px; font-weight: 900; font-size: 80px; line-height: 1; letter-spacing: -2px; color: var(--ink); }
-  .title .word { display: inline-block; margin: 0 .13em; transform-origin: 50% 80%; }
-  .title .hot { color: var(--hot); position: relative; }
-  .title .hot svg { position: absolute; left: -4%; width: 108%; bottom: -26px; height: 30px; overflow: visible; }
-  .title .hot path { fill: none; stroke: var(--hot); stroke-width: 7; stroke-linecap: round; }
-  .title .sticker { display: inline-block; font-family: 'Noto Color Emoji'; font-size: 78px; margin-left: .12em; transform-origin: 50% 70%; filter: drop-shadow(0 6px 8px rgb(110 50 80 / .18)); }
-  .sub { top: 250px; font-weight: 800; font-size: 43px; color: var(--muted); letter-spacing: -.3px; }
-  .sub span { display: inline-block; }
   #phone { position: absolute; left: 0; top: 0; transform-origin: 50% 50%; }
   #phone .body { position: absolute; inset: 0; border-radius: 116px; background: linear-gradient(150deg, #ffd9e3 0%, #f5b7c9 45%, #eaa1b8 100%); box-shadow: inset 0 0 0 4px #925569, inset 6px 8px 0 4px rgb(255 255 255 / .45), inset -6px -8px 0 4px rgb(146 85 105 / .25); }
   #phone .bezel { position: absolute; inset: 14px; border-radius: 102px; background: #241b22; box-shadow: 0 0 0 2px rgb(146 85 105 / .5); }
@@ -32,6 +24,25 @@
   #outro .wordmark { font-size: 112px; letter-spacing: -3px; }
   .wordmark span { display: inline-block; transform-origin: 50% 90%; }
   .tagline { font-weight: 800; font-size: 48px; color: var(--hot); letter-spacing: -.5px; }
+  /* The header band: where every step is read, always in the same place. */
+  #band { position: absolute; left: 0; top: 0; width: 1080px; height: 480px; }
+  .band-sheet { position: absolute; left: 0; right: 0; top: -100px; height: 580px; border-radius: 0 0 60px 60px; background: var(--band); box-shadow: 0 22px 44px -26px rgb(110 50 80 / .4), inset 0 -2px 0 rgb(182 73 103 / .08); }
+  .hero { position: absolute; left: 0; right: 0; top: 96px; text-align: center; }
+  .hero-num { font-weight: 800; font-size: 36px; color: var(--hot); letter-spacing: .4px; }
+  .hero-title { margin-top: 18px; font-weight: 900; font-size: 96px; line-height: 1; letter-spacing: -2.5px; color: var(--ink); white-space: nowrap; }
+  .hero-title .word { display: inline-block; margin: 0 .12em; transform-origin: 50% 80%; }
+  .hero-title .hot { color: var(--hot); position: relative; }
+  .hero-title .hot svg { position: absolute; left: -4%; width: 108%; bottom: -26px; height: 30px; overflow: visible; }
+  .hero-title .hot path { fill: none; stroke: var(--hot); stroke-width: 7; stroke-linecap: round; }
+  .hero-title .sticker { display: inline-block; font-family: 'Noto Color Emoji'; font-size: 84px; margin-left: .14em; transform-origin: 50% 70%; }
+  .hero-sub { margin-top: 44px; font-weight: 800; font-size: 44px; color: var(--muted); }
+  .head { position: absolute; left: 0; right: 0; top: 54px; display: flex; justify-content: center; align-items: center; gap: 16px; font-weight: 900; font-size: 38px; color: var(--hot); }
+  .head .num { padding: 6px 18px; border-radius: 999px; background: var(--chip); font-weight: 800; font-size: 30px; }
+  .head .emo { font-family: 'Noto Color Emoji'; font-size: 38px; }
+  .step-text { position: absolute; left: 70px; right: 70px; top: 132px; height: 220px; display: flex; align-items: center; justify-content: center; text-align: center; font-weight: 900; font-size: 72px; line-height: 1.1; letter-spacing: -1.4px; color: var(--ink); text-wrap: balance; }
+  .step-text.result { color: var(--hot); }
+  .dots { position: absolute; left: 0; right: 0; top: 392px; display: flex; justify-content: center; gap: 14px; }
+  .dot { width: 20px; height: 20px; border-radius: 10px; background: var(--dot); } /* the current step's dot grows into a pill */
   .pill { display: inline-block; padding: 14px 30px; border-radius: 999px; font-weight: 800; font-size: 32px; background: rgb(255 255 255 / .1); color: #fff2e9; box-shadow: inset 0 0 0 2px rgb(247 182 205 / .35); }
   .url { color: #d8c1d3; }
 </style>
@@ -39,7 +50,6 @@
 <body>
 <div id="stage">
   <canvas id="bg" class="layer" width="1080" height="1920"></canvas>
-  <div id="titles"></div>
   <div id="shadow"></div>
   <div id="phone">
     <div class="body"></div>
@@ -49,6 +59,7 @@
     <div class="bezel"></div>
     <div class="screen"><canvas id="screen" width="1170" height="2532"></canvas><div class="island"></div><div class="glare"></div></div>
   </div>
+  <div id="band"><div class="band-sheet"></div></div>
   <canvas id="fx" class="layer" width="1080" height="1920"></canvas>
   <div id="intro"></div>
   <div id="outro"></div>

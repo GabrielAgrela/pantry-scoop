@@ -115,8 +115,13 @@ export class Recorder {
   }
 
   log(type, data = {}) { this.events.push({ type, t: this.t, frame: this.frame, ...data }); }
-  /** A caption for something that just happened on screen (no finger), pinned to an element. */
-  async note(label, selector, text, inner) { this.log('note', { label, rect: await this.box(selector, text, inner) }); }
+  /** A step about something on screen (no finger): the sentence and the box(es) it points at. */
+  async note(step, ...targets) {
+    const boxes = await Promise.all(targets.map((target) => (Array.isArray(target) ? this.box(...target) : this.box(target))));
+    const x = Math.min(...boxes.map((b) => b.x)), y = Math.min(...boxes.map((b) => b.y));
+    const rect = { x, y, w: Math.max(...boxes.map((b) => b.x + b.w)) - x, h: Math.max(...boxes.map((b) => b.y + b.h)) - y };
+    this.log('note', { step, rect });
+  }
   mark(label, data = {}) { this.log('mark', { label, ...data }); }
   async focus(label, selector, text, inner) { this.log('focus', { label, rect: await this.box(selector, text, inner) }); }
 
@@ -127,10 +132,12 @@ export class Recorder {
     return Promise.race([sent, new Promise((resolve) => setTimeout(resolve, 250))]);
   }
 
-  /** A finger tap: down, a short hold, up. `label` says in the edit what the tap does. */
-  async tap(target, text, { hold = 90, after = 0, label, ...offset } = {}) {
-    const p = await this.point(target, text, offset);
-    this.log('tap', { x: p.x, y: p.y, hold, ...(label ? { label } : {}) });
+  /** A finger tap: down, a short hold, up. `step` is the sentence the edit shows for it. */
+  async tap(target, text, { hold = 90, after = 0, step, ...offset } = {}) {
+    const { dx = 0.5, dy = 0.5, inner } = offset;
+    const rect = typeof target === 'object' ? undefined : await this.box(target, text, inner);
+    const p = rect ? { x: rect.x + rect.w * dx, y: rect.y + rect.h * dy } : target;
+    this.log('tap', { x: p.x, y: p.y, hold, ...(rect ? { rect } : {}), ...(step ? { step } : {}) });
     await this.touch('touchStart', [p]);
     await this.wait(hold);
     await this.touch('touchEnd', []);
@@ -144,9 +151,9 @@ export class Recorder {
    * drags in the headless shell either lose movement to touch coalescing or stall BeginFrame once a
    * release starts a momentum fling. The edit draws the finger from the logged path.
    */
-  async drag(scroller, from, to, ms = 450) {
+  async drag(scroller, from, to, ms = 450, { step } = {}) {
     const a = await this.point(from), b = await this.point(to);
-    this.log('swipe', { x: a.x, y: a.y, x2: b.x, y2: b.y, ms });
+    this.log('swipe', { x: a.x, y: a.y, x2: b.x, y2: b.y, ms, ...(step ? { step } : {}) });
     const start = await this.eval(`(() => { const el = document.querySelector(${JSON.stringify(scroller)}); return [el.scrollLeft, el.scrollTop]; })()`);
     await this.step();
     const n = Math.max(2, Math.round(ms / this.interval));

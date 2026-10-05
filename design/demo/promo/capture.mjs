@@ -1,8 +1,8 @@
 // Records one continuous session of real app use on a 390×797 phone viewport (plus the status
-// bar and home indicator the edit draws around it). Writes JPEG frames and capture.json (taps with
-// their on-screen labels, notes, drags, chapters and focus boxes) for the edit.
+// bar and home indicator the edit draws around it). Writes JPEG frames and capture.json for the
+// edit: every step carries the sentence the edit shows for it and the box it points at.
 //
-// The story keeps to the steps a first-time viewer can follow, with a pause after each result.
+// The story keeps to steps a first-time viewer can follow, with time to see each result.
 //
 //   node --disable-warning=ExperimentalWarning design/demo/promo/capture.mjs [out-dir] [dpr]
 import { writeFileSync } from 'node:fs';
@@ -21,13 +21,13 @@ world.recipeMs = 2600; // finished just before the second 1.5 s poll
 const started = Date.now();
 
 /** Drags the pantry list up (as many times as needed) until the element's centre reaches targetY. */
-async function swipeUntilVisible(selector, targetY, { x = 195, startY = 545 } = {}) {
+async function swipeUntilVisible(selector, targetY, { x = 195, startY = 545, step } = {}) {
   for (let i = 0; i < 6; i++) {
     const box = await rec.box(selector);
     const distance = box.y + box.h / 2 - targetY;
     if (distance < 30) return;
     const d = Math.min(distance, 440);
-    await rec.drag('.stock-list', { x, y: startY }, { x, y: startY - d }, Math.round(300 + d * 0.55));
+    await rec.drag('.stock-list', { x, y: startY }, { x, y: startY - d }, Math.round(320 + d * 0.6), { step: i === 0 ? step : undefined });
     await rec.wait(150);
   }
 }
@@ -40,85 +40,88 @@ try {
   await rec.start();
 
   rec.mark('onboarding');
-  await rec.focus('scoop', '.scoop-companion');
-  await rec.wait(1300);
-  await rec.tap('.scoop-pet', undefined, { label: 'Tap Scoop for tips' });
-  await rec.wait(1700);
-  await rec.tap('.guide-actions button.primary', undefined, { dx: 0.3, label: 'Keep your tools' });
-  await rec.wait(1400);
-  await rec.tap('.guide-actions button.primary', undefined, { dx: 0.25, label: 'Finish setup' }); // left of Scoop's bubble
-  await rec.wait(2200);
+  await rec.note('Scoop, your tiny chef, says hi', '.scoop-companion', '.scoop-bubble');
+  await rec.wait(1500);
+  await rec.tap('.scoop-pet', undefined, { step: 'Tap Scoop any time for a tip' });
+  await rec.wait(1900);
+  await rec.tap('.guide-actions button.primary', undefined, { dx: 0.3, step: 'Your usual tools are picked. Tap Next' });
+  await rec.wait(1500);
+  await rec.tap('.guide-actions button.primary', undefined, { dx: 0.25, step: 'Check the defaults and finish' }); // left of Scoop's bubble
+  await rec.wait(2300);
 
   rec.mark('scan');
-  await rec.tap('.pantry-actions button.primary', undefined, { label: 'Scan your groceries' });
-  await rec.wait(1100);
+  await rec.tap('.pantry-actions button.primary', undefined, { step: 'Tap Scan groceries' });
+  await rec.wait(1200);
   rec.nextFiles([photo]);
-  await rec.tap('dialog.scan-source button', 'Choose photos', { label: 'Pick a photo' });
+  await rec.tap('dialog.scan-source button', 'Choose photos', { step: 'Pick a photo of your shopping' });
   rec.log('photo');
+  await rec.wait(650);
+  await rec.note('Scoop reads the photo…', '#scan-progress');
   await rec.until(`document.querySelector('dialog.scan-review .scan-photos img')`, { timeout: 6000 });
   rec.log('review');
   await rec.wait(700);
-  await rec.note('8 ingredients found', 'dialog.scan-review .scan-overview');
-  await rec.focus('found', 'dialog.scan-review .scan-overview');
-  await rec.wait(1700);
-  await rec.drag('dialog.scan-review .review-scroll', { x: 195, y: 620 }, { x: 195, y: 360 }, 650);
-  await rec.wait(900);
-  await rec.tap('dialog.scan-review .review-actions button.primary', undefined, { label: 'Add them to your pantry' });
+  await rec.note('It found 8 ingredients', 'dialog.scan-review .scan-overview');
+  await rec.wait(1800);
+  await rec.drag('dialog.scan-review .review-scroll', { x: 195, y: 620 }, { x: 195, y: 360 }, 700, { step: 'Check them, edit anything' });
+  await rec.wait(1100);
+  await rec.tap('dialog.scan-review .review-actions button.primary', undefined, { step: 'Add them to your pantry' });
   rec.log('added');
   await rec.wait(900);
-  await rec.note('Added to the right shelves', '.stock-list .item.fresh');
-  await rec.wait(1700);
+  await rec.note('Each one lands on the right shelf', ['.category', 'Produce']);
+  await rec.wait(1900);
 
   rec.mark('tidy');
-  await rec.tap('.item', 'Avocados', { inner: '.stock-toggle', label: 'Used them up? One tap' });
-  await rec.wait(1800);
-  await swipeUntilVisible('.classify-button', 430);
+  await rec.tap('.item', 'Avocados', { inner: '.stock-toggle', step: 'Ran out? One tap moves it to restock' });
+  await rec.wait(1900);
+  await swipeUntilVisible('.classify-button', 430, { step: 'Scroll down to the Other shelf' });
   await rec.wait(400);
   await rec.focus('sort', '.classify-button');
-  await rec.tap('.classify-button', undefined, { label: 'Sort the strays with ChatGPT' });
+  await rec.tap('.classify-button', undefined, { step: 'Ask ChatGPT to sort the strays' });
   await rec.wait(2100);
-  await rec.note('New shelves, all sorted', '.category', 'Chocolate');
-  await rec.wait(1700);
+  await rec.note('They find their own shelves', ['.category', 'Chocolate'], ['.category', 'Snacks']);
+  await rec.wait(1900);
 
   rec.mark('recipes');
-  await rec.tap('.tabbar [data-tab="recipes"]', undefined, { label: 'Go to Recipes' });
+  await rec.tap('.tabbar [data-tab="recipes"]', undefined, { step: 'Open Recipes' });
+  await rec.wait(1200);
+  await rec.tap('.compose-toggle', undefined, { step: 'Tap “What shall we cook?”' });
   await rec.wait(1100);
-  await rec.tap('.compose-toggle', undefined, { label: 'What shall we cook?' });
-  await rec.wait(1000);
-  await rec.tap('.craving-input input', undefined, { label: 'Type a craving' });
+  await rec.tap('.craving-input input', undefined, { step: 'Type what you’re craving' });
   await rec.wait(250);
-  await rec.type('something cozy', { perChar: 70 });
-  await rec.wait(600);
-  await rec.tap('.recipe-suggest', undefined, { label: 'Find recipe ideas' });
+  await rec.type('something cozy', { perChar: 75 });
+  await rec.wait(700);
+  await rec.tap('.recipe-suggest', undefined, { step: 'Find recipe ideas' });
   rec.log('thinking');
   await rec.wait(900);
   // Fold the composer while Scoop thinks, so the ideas land in view.
   await rec.tap('.compose-toggle');
+  await rec.wait(350);
+  await rec.note('Scoop thinks up ideas…', '#recipe-progress');
   await rec.until(`document.querySelector('.suggestion-grid .recipe-card.idea-fresh')`, { timeout: 8000 });
   rec.log('ideas');
-  await rec.note('3 ideas from your pantry', '.suggestion-grid');
-  await rec.focus('ideas', '.suggestion-grid');
-  await rec.wait(2200);
-  await rec.tap('.suggestion-grid .recipe-open', undefined, { label: 'Open one' });
-  await rec.wait(1700);
-  await rec.tap('.recipe-next', undefined, { label: 'See the ingredients' });
-  await rec.wait(1300);
-  await rec.note('All in your pantry', '.recipe-detail .recipe-ingredients .recipe-section-title');
-  await rec.wait(1400);
-  await rec.focus('save', '.recipe-save');
-  await rec.tap('.recipe-save', undefined, { label: 'Save it' });
-  rec.log('saved');
+  await rec.wait(1100); // the cards finish arriving
+  await rec.note('3 ideas, all from your pantry', '.suggestion-grid');
   await rec.wait(1500);
+  await rec.tap('.suggestion-grid .recipe-open', undefined, { step: 'Open one' });
+  await rec.wait(1800);
+  await rec.tap('.recipe-next', undefined, { step: 'See the ingredients' });
+  await rec.wait(1300);
+  await rec.note('Everything is already in your pantry', '.recipe-detail .recipe-ingredients');
+  await rec.wait(1500);
+  await rec.focus('save', '.recipe-save');
+  await rec.tap('.recipe-save', undefined, { step: 'Save it to your recipe box' });
+  rec.log('saved');
+  await rec.wait(1600);
   await rec.tap('.recipe-sheet-header button.icon');
-  await rec.wait(1200);
+  await rec.wait(1300);
 
   rec.mark('dark');
-  await rec.tap('.tabbar [data-tab="profile"]', undefined, { label: 'Your kitchen' });
+  await rec.tap('.tabbar [data-tab="profile"]', undefined, { step: 'Open your kitchen' });
   await rec.wait(1300);
   await rec.focus('avatar', '.header-end .avatar');
-  await rec.tap('.theme-toggle', undefined, { label: 'Night mode' });
+  await rec.tap('.theme-toggle', undefined, { step: 'Tap the moon for night mode' });
   rec.log('night');
-  await rec.wait(3000);
+  await rec.wait(3200);
   rec.stop();
 } catch (error) {
   console.error(error);

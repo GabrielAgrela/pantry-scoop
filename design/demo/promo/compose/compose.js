@@ -1,9 +1,10 @@
 // The promo's motion design. Every frame is a pure function of its index: renderFrame(n) draws
 // output frame n (60 fps, 1080×1920) from the captured app footage and capture.json's events.
 //
-// Built to be easy to follow: each chapter opens on a wide shot with its caption while the footage
-// pauses, then the camera moves in until the phone fills the frame and follows each step, with a
-// label beside the finger saying what is happening.
+// It plays as a tutorial a first-time viewer can follow. A band at the top always says, in one
+// sentence, what happens next, and each chapter opens there with its title. Before every step the
+// footage pauses while a spotlight dims the screen around the button about to be tapped (or the
+// result to look at). Then the step plays at real speed.
 
 const FPS = 60;
 const W = 1080, H = 1920;
@@ -11,12 +12,24 @@ const INTRO = 3.0, OUTRO = 3.9;
 const PT = 640 / 390; // phone pixels per app point
 const STATUS = 47; // status bar height in points; the app viewport sits below it
 const PHONE_W = 690, PHONE_H = 1435, ORIGIN_X = PHONE_W / 2, ORIGIN_Y = PHONE_H / 2;
-const BASE = { x: 540, y: 1122 };
-const FOLLOW = 1.5; // phone scale while following the action: the screen fills the frame
-const DAY = { ink: '#493442', hot: '#b64967', muted: '#6f5667' };
-const NIGHT = { ink: '#fff2e9', hot: '#f7b6cd', muted: '#d8c1d3' };
+const BAND_H = 480; // the band at the top where every step is read
+const ZOOM = 1.1; // phone scale during the show
+const CY_TOP = BAND_H + 18 + ORIGIN_Y * ZOOM; // phone centre with its top just under the band
+const CY_BOTTOM = H - 14 - ORIGIN_Y * ZOOM; // phone centre with its bottom at the foot of the frame
+const PAUSE = { chapter: 1.75, tap: 0.95, swipe: 0.85, note: 1.15 }; // seconds the footage waits
+const DAY = { ink: '#493442', hot: '#b64967', muted: '#6f5667', band: '#fffcf8', chip: '#fbe2e9', dot: '#f0dbe2', dotDone: '#e3a2b8' };
+const NIGHT = { ink: '#fff2e9', hot: '#f7b6cd', muted: '#d8c1d3', band: '#2e2535', chip: '#4a3446', dot: '#4c3c4f', dotDone: '#a1708c' };
+const ORDER = ['onboarding', 'scan', 'tidy', 'recipes', 'dark'];
+const CHAPTERS = {
+  onboarding: { emoji: '👋', words: ['Meet', '*Scoop*'], name: 'Meet Scoop', sub: 'your tiny kitchen chef' },
+  scan: { emoji: '📸', words: ['Snap', 'your', '*groceries*'], name: 'Snap your groceries', sub: 'one photo fills your pantry' },
+  tidy: { emoji: '✨', words: ['Keep', 'it', '*tidy*'], name: 'Keep it tidy', sub: 'restock and sort in a tap' },
+  recipes: { emoji: '🍝', words: ['Cook', 'what', 'you', '*have*'], name: 'Cook what you have', sub: 'ideas made from your pantry' },
+  dark: { emoji: '🌙', words: ['Cozy', '*night*', 'mode'], name: 'Cozy night mode', sub: 'sweet dreams, little pantry' },
+};
 
 const $ = (id) => document.getElementById(id);
+const el = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text != null) node.textContent = text; return node; };
 const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
 const lerp = (a, b, t) => a + (b - a) * t;
 const smooth = (t) => { t = clamp(t); return t * t * (3 - 2 * t); };
@@ -26,50 +39,77 @@ const easeIn = (t) => clamp(t) ** 3;
 /** A damped spring from 0 to 1 (t in seconds); overshoots a little, settles in ~0.6 s. */
 const spring = (t, k = 15, d = 7) => (t <= 0 ? 0 : 1 - Math.exp(-d * t) * Math.cos(k * t));
 function rng(seed) { return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
-const hex = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
-const mix = (a, b, t) => { const x = hex(a), y = hex(b); return `rgb(${x.map((v, i) => Math.round(lerp(v, y[i], t))).join(',')})`; };
+const rgb = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
+const blend = (a, b, t) => a.map((v, i) => Math.round(lerp(v, b[i], t)));
+const css = (c) => `rgb(${c.join(',')})`;
 
-let cap, events, taps, drags, notes, srcTable, total, footageEnd, tapTimes = [], holdWindows = [], camera = [];
-const LEAD = 0.22; // a chapter's pause starts this long before its first tap, before the finger appears
-const at = (label, type = 'mark') => events.find((e) => (e.label ?? e.type) === label && (type === 'any' || e.type === type))?.t;
+let cap, events, taps, drags, steps, beats, stepBeats, chapterBeats, srcTable, total, footageEnd, camera, tapTimes = [];
 const ev = (type) => events.find((e) => e.type === type)?.t;
-/** Output time of a chapter's pause (its caption and sticker set arrive with it). */
-const pauseAt = (label) => outAt(at(label) - LEAD);
-/** 0…1 while the footage holds for a caption: the phone steps back and the screen softens. */
-const holdAmount = (t) => Math.max(0, ...holdWindows.map(([a, b]) => smooth((t - a) / 0.3) * (1 - smooth((t - b + 0.32) / 0.32))));
+const focusRect = (label) => events.find((e) => e.type === 'focus' && e.label === label)?.rect;
 
 // ---------------------------------------------------------------------------------------------
-// Timeline: output time → footage time, with a pause at every chapter and gently faster waits.
+// Steps and timeline: every logged step gets a pause before it (a longer one opens each chapter),
+// and the footage maps onto output time through those pauses and a few gently faster waits.
 // ---------------------------------------------------------------------------------------------
+function buildSteps() {
+  let chapter = ORDER[0];
+  steps = [];
+  for (const e of events) {
+    if (e.type === 'mark' && CHAPTERS[e.label]) chapter = e.label;
+    if (!e.step) continue;
+    const kind = e.type === 'swipe' ? 'swipe' : e.type === 'note' ? 'note' : 'tap';
+    // A tap pauses just before the finger lands; a result pauses on the result.
+    const point = Math.max(0, kind === 'tap' ? e.t - 0.2 : kind === 'swipe' ? e.t - 0.05 : e.t);
+    const focus = e.rect ? e.rect.y + Math.min(e.rect.h, 420) / 2 : (e.y + e.y2) / 2;
+    steps.push({ kind, chapter, text: e.step, point, focus, rect: e.rect, e });
+  }
+  for (const mark of ORDER) steps.filter((s) => s.chapter === mark).forEach((s, index, list) => Object.assign(s, { index, count: list.length }));
+}
+
 function buildTimeline() {
+  footageEnd = cap.frames / FPS;
   const ramps = [
-    [ev('photo') + 0.15, ev('review') - 0.1, 1.4], // scanning…
-    [at('sort', 'focus') - 2.4, at('sort', 'focus') - 0.15, 1.6], // scrolling to the strays
-    [ev('thinking') + 0.3, ev('ideas') - 0.1, 1.4], // Scoop thinks
+    [ev('photo') + 0.15, ev('review') - 0.1, 1.35], // Scoop reads the photo
+    [ev('thinking') + 0.3, ev('ideas') - 0.1, 1.35], // Scoop thinks up ideas
   ];
-  const holds = [[0, 1.5], [at('scan') - LEAD, 1.45], [at('tidy') - LEAD, 1.45], [at('recipes') - LEAD, 1.45], [at('dark') - LEAD, 1.35]];
   const speedAt = (s) => {
     let v = 1;
     for (const [a, b, k] of ramps) v += (k - 1) * smooth((s - a) / 0.2) * (1 - smooth((s - (b - 0.2)) / 0.2));
     return v;
   };
-  footageEnd = cap.frames / FPS;
+  const holds = [];
+  for (const step of steps) {
+    if (step.index === 0) holds.push({ kind: 'chapter', chapter: step.chapter, point: step.point, seconds: PAUSE.chapter });
+    holds.push({ kind: step.kind, chapter: step.chapter, point: step.point, seconds: PAUSE[step.kind], step });
+  }
+  holds.sort((a, b) => a.point - b.point); // stable: a chapter's title comes before its first step
   srcTable = [];
   for (let n = 0; n < Math.round(INTRO * FPS); n++) srcTable.push(0);
+  beats = [];
   let s = 0, next = 0;
-  holdWindows = [];
   while (s < footageEnd - 1 / FPS) {
-    while (next < holds.length && holds[next][0] <= s + 1e-6) {
-      const [point, seconds] = holds[next++];
-      s = Math.max(s, point); // so outAt(point) finds the start of the pause
-      holdWindows.push([srcTable.length / FPS, srcTable.length / FPS + seconds]);
-      for (let k = 0; k < Math.round(seconds * FPS); k++) srcTable.push(s);
+    while (next < holds.length && holds[next].point <= s + 1e-6) {
+      const hold = holds[next++];
+      s = Math.max(s, hold.point); // so outAt(point) finds the start of the pause
+      const start = srcTable.length / FPS;
+      for (let k = 0; k < Math.round(hold.seconds * FPS); k++) srcTable.push(s);
+      beats.push({ ...hold, start, end: srcTable.length / FPS });
     }
     srcTable.push(s);
-    s = Math.min(s + speedAt(s) / FPS, next < holds.length ? holds[next][0] : Infinity);
+    s = Math.min(s + speedAt(s) / FPS, next < holds.length ? holds[next].point : Infinity);
   }
   for (let n = 0; n < Math.round(OUTRO * FPS); n++) srcTable.push(footageEnd - 1 / FPS);
   total = srcTable.length;
+  beats.forEach((b, i) => { b.next = beats[i + 1]?.start ?? footageStop(); });
+  stepBeats = beats.filter((b) => b.step);
+  chapterBeats = beats.filter((b) => b.kind === 'chapter');
+  // The spotlight lifts as a tap lands (the screen often changes right after) and soon after a
+  // result plays on, and is gone before the next step.
+  for (const b of stepBeats) {
+    const e = b.step.e;
+    const until = b.kind === 'tap' ? outAt(e.t) + e.hold / 1000 + 0.05 : b.kind === 'note' ? b.end + 0.5 : b.end;
+    b.spotEnd = Math.max(b.end, Math.min(until, b.next - 0.25));
+  }
 }
 const srcAt = (t) => srcTable[clamp(Math.round(t * FPS), 0, total - 1)];
 let stopAt;
@@ -79,6 +119,16 @@ function outAt(s) {
   if (s <= 0) return INTRO;
   const n = srcTable.findIndex((v, i) => i >= INTRO * FPS && v >= s);
   return (n < 0 ? total : n) / FPS;
+}
+/** When a step's sentence arrives in the band, once the previous line (or the chapter's title) has left. */
+const textAt = (b) => b.start + (b.step.index === 0 ? 0.28 : 0.13);
+const TEXT_OUT = 0.15; // a sentence leaves this fast
+const HERO_IN = 0.15; // a chapter's title waits this long for the last sentence to leave
+/** 0…1 while a chapter title is up: the phone steps back and its screen softens. */
+function veilAt(t) {
+  let v = 0;
+  for (const b of chapterBeats) v = Math.max(v, smooth((t - b.start + 0.1) / 0.3) * (1 - smooth((t - b.end + 0.25) / 0.3)));
+  return v;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -166,44 +216,27 @@ function wavePath(ctx, p) {
   ctx.lineTo(last[0] - nx * behind, last[1] - ny * behind); ctx.lineTo(first[0] - nx * behind, first[1] - ny * behind); ctx.closePath();
 }
 
-// Sticker slots around the phone in the wide shots; each chapter swaps in its own set.
+// Stickers frame the title cards only: groceries around the hello, a night sky around goodnight.
 const SLOTS = [[96, 560, 104, -8], [986, 640, 98, 10], [76, 905, 90, 6], [1004, 975, 108, -6], [100, 1255, 100, 9], [980, 1330, 94, -10], [82, 1610, 108, -4], [1000, 1690, 96, 7], [176, 1850, 84, 12], [902, 1862, 90, -9], [74, 112, 72, -12], [1006, 104, 76, 12]];
-const SETS = {
-  intro: ['🍋', '🍅', '🌿', '🧁', '🥑', '🍓', '🥕', '🧀', '🍯', '🫖', '✨', '💗'],
-  onboarding: ['🍳', '🧊', '🍟', '♨️', '❄️', '🫖', '🥄', '🍽️', '🧂', '🍴', '✨', '💗'],
-  scan: ['🍅', '🧄', '🍋', '🌿', '🍞', '🫒', '🥬', '🧅', '🛍️', '📸', '✨', '🌼'],
-  tidy: ['🫘', '🍫', '🍿', '🥑', '🥚', '🧀', '🍯', '🌾', '🫙', '🧺', '✨', '💗'],
-  recipes: ['🍝', '🥪', '🍨', '🧁', '🍳', '🥗', '🍲', '🍰', '🍪', '🥤', '✨', '💗'],
-  night: ['🌙', '⭐', '☁️', '💤', '🌟', '✨', '🫖', '🍪', '⭐', '🌙', '💫', '✨'],
-};
-let chapters;
-function stickerSet(t) {
-  chapters ??= [[0, 'intro'], [INTRO - 0.35, 'onboarding'], [pauseAt('scan'), 'scan'], [pauseAt('tidy'), 'tidy'], [pauseAt('recipes'), 'recipes'], [outAt(ev('night') + 0.5), 'night']];
-  let i = 0;
-  while (i + 1 < chapters.length && t >= chapters[i + 1][0]) i++;
-  return { cur: chapters[i], prev: chapters[i - 1] ?? null };
-}
-function drawSlots(ctx, t, nightP, follow) {
-  if (follow > 0.98) return; // the phone fills the frame
-  const { cur, prev } = stickerSet(t);
+const INTRO_SET = ['🍋', '🍅', '🌿', '🧁', '🥑', '🍓', '🥕', '🧀', '🍯', '🫖', '✨', '💗'];
+const NIGHT_SET = ['🌙', '⭐', '☁️', '💤', '🌟', '✨', '🫖', '🍪', '⭐', '🌙', '💫', '✨'];
+function drawSlots(ctx, t, nightP) {
+  const outroAt = footageStop() + 0.25;
+  if (t > INTRO + 0.3 && t < outroAt) return;
   SLOTS.forEach(([x, y, size, rot], i) => {
     const bob = Math.sin((t / 3.4 + i * 0.37) * Math.PI * 2) * 10, wob = Math.sin((t / 4.6 + i * 0.21) * Math.PI * 2) * 7;
-    const since = t - cur[0] - i * 0.035;
-    let symbol = SETS[cur[1]][i], scale = 1;
-    if (prev && since < 0.22) { symbol = SETS[prev[1]][i]; scale = 1 - easeIn(since / 0.22); }
-    else if (prev) scale = spring(since - 0.22, 16, 8);
-    // The top corners belong to the captions once the show starts.
-    if (i >= 10 && cur[1] !== 'intro') { if (prev?.[1] !== 'intro' || since >= 0.22) return; }
-    if (cur[1] === 'intro') scale = spring(t - 0.15 - i * 0.05, 14, 7);
-    if (i < 2) scale *= 1 - easeIn((t - footageStop()) / 0.3);
-    drawSticker(ctx, symbol, size, x, y + bob, { scale, rot: rot + wob, alpha: lerp(0.92, 0.82, nightP) * (1 - follow) });
+    const intro = t <= INTRO + 0.3;
+    const scale = intro
+      ? spring(t - 0.15 - i * 0.05, 14, 7) * (1 - easeIn((t - (INTRO - 0.6) - i * 0.02) / 0.3)) // they pop away as the phone arrives
+      : spring(t - outroAt - i * 0.04, 16, 8);
+    drawSticker(ctx, intro ? INTRO_SET[i] : NIGHT_SET[i], size, x, y + bob, { scale, rot: rot + wob, alpha: lerp(0.92, 0.82, nightP) });
   });
 }
-function drawBackground(t, follow) {
+function drawBackground(t) {
   const night = nightProgress(t);
   world(bg, false, t);
   if (night > 0) { bg.save(); wavePath(bg, night); bg.clip(); world(bg, true, t); bg.restore(); }
-  drawSlots(bg, t, night, follow);
+  drawSlots(bg, t, night);
 }
 function nightProgress(t) {
   const p = clamp((t - outAt(ev('night') + 0.12)) / 1.05);
@@ -218,117 +251,140 @@ function bezier(x1, y1, x2, y2, x) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Captions: one bouncy line per chapter, shown on the chapter's wide shot while the footage waits.
+// The band: a chapter's title while the footage waits, then the chapter's name, one sentence for
+// the current step and a dot per step, always in the same place.
 // ---------------------------------------------------------------------------------------------
-const TITLES = [];
-function buildTitles() {
-  const holdEnd = (i) => holdWindows[i][1];
-  const defs = [
-    { from: INTRO - 0.12, until: holdEnd(0) - 0.05, words: ['Meet', '*Scoop*'], emoji: '👋', sub: 'your tiny kitchen chef' },
-    { from: pauseAt('scan'), until: holdEnd(1) - 0.05, words: ['Snap', 'your', '*groceries*'], emoji: '📸', sub: 'one photo fills your pantry' },
-    { from: pauseAt('tidy'), until: holdEnd(2) - 0.05, words: ['Tidy,', 'all', '*by itself*'], emoji: '✨', sub: 'restock in a tap · sort with ChatGPT' },
-    { from: pauseAt('recipes'), until: holdEnd(3) - 0.05, words: ['Cook', 'what', 'you', '*have*'], emoji: '🍝', sub: 'recipe ideas from your pantry' },
-    { from: pauseAt('dark'), until: footageStop() + 0.05, words: ['Cozy', '*night*', 'mode'], emoji: '🌙', sub: 'sweet dreams, little pantry' },
-  ];
-  const root = $('titles');
-  for (const def of defs) {
-    const line = document.createElement('div'); line.className = 'copy title';
+const band = {};
+function buildBand() {
+  const root = $('band');
+  ORDER.forEach((mark, i) => {
+    const def = CHAPTERS[mark];
+    const hero = el('div', 'hero'), num = el('div', 'hero-num', `Part ${i + 1} of ${ORDER.length}`), title = el('div', 'hero-title'), sub = el('div', 'hero-sub', def.sub);
     const words = def.words.map((w) => {
-      const span = document.createElement('span'); span.className = 'word';
-      if (w.startsWith('*')) {
-        span.classList.add('hot'); span.textContent = w.slice(1, -1);
-        span.insertAdjacentHTML('beforeend', '<svg viewBox="0 0 200 30" preserveAspectRatio="none"><path d="M4 18 C 40 6, 70 26, 104 15 S 168 8, 196 16"/></svg>');
-      } else span.textContent = w;
-      line.append(span); return span;
+      const span = el('span', 'word');
+      if (!w.startsWith('*')) { span.textContent = w; return span; }
+      span.classList.add('hot'); span.textContent = w.slice(1, -1);
+      span.insertAdjacentHTML('beforeend', '<svg viewBox="0 0 200 30" preserveAspectRatio="none"><path d="M4 18 C 40 6, 70 26, 104 15 S 168 8, 196 16"/></svg>');
+      return span;
     });
-    const emoji = document.createElement('span'); emoji.className = 'sticker'; emoji.textContent = def.emoji; line.append(emoji);
-    const sub = document.createElement('div'); sub.className = 'copy sub';
-    sub.innerHTML = `<span>${def.sub}</span>`;
-    root.append(line, sub);
-    const path = line.querySelector('.hot path'); const length = 200;
-    path.style.strokeDasharray = `${length}`;
-    TITLES.push({ ...def, line, sub, words, emoji, path, length });
-  }
+    const emoji = el('span', 'sticker', def.emoji);
+    title.append(...words, emoji);
+    hero.append(num, title, sub);
+    const head = el('div', 'head');
+    head.append(el('span', 'num', `${i + 1}/${ORDER.length}`), el('span', '', def.name), el('span', 'emo', def.emoji));
+    const own = stepBeats.filter((b) => b.chapter === mark);
+    const dots = el('div', 'dots'), dotEls = own.map(() => dots.appendChild(el('div', 'dot')));
+    root.append(hero, head, dots);
+    // A long title shrinks to fit.
+    title.style.display = 'inline-block';
+    const width = title.offsetWidth;
+    title.style.display = '';
+    if (width > 980) title.style.fontSize = `${Math.floor((96 * 980) / width)}px`;
+    const path = title.querySelector('.hot path');
+    path.style.strokeDasharray = '200';
+    const k = chapterBeats.findIndex((b) => b.chapter === mark), beat = chapterBeats[k];
+    band[mark] = {
+      hero, num, words, emoji, sub, path, head, dots, dotEls,
+      from: i === 0 ? INTRO - 0.2 : beat.start, until: beat.end, next: chapterBeats[k + 1]?.start ?? footageStop(), stepStarts: own.map((b) => b.start),
+    };
+  });
+  for (const b of stepBeats) root.append((b.el = el('div', `step-text${b.kind === 'note' ? ' result' : ''}`, b.step.text)));
 }
-function drawTitles(t, follow) {
-  const night = nightProgress(t);
-  const stage = $('stage').style;
-  stage.setProperty('--ink', mix(DAY.ink, NIGHT.ink, smooth(night * 1.5 - 0.25)));
-  stage.setProperty('--hot', mix(DAY.hot, NIGHT.hot, smooth(night * 1.5 - 0.25)));
-  stage.setProperty('--muted', mix(DAY.muted, NIGHT.muted, smooth(night * 1.5 - 0.25)));
-  const groupAlpha = 1 - smooth((follow - 0.1) / 0.35);
-  for (const title of TITLES) {
-    const local = t - title.from, leaving = t - title.until;
-    const visible = local > -0.05 && leaving < 0.5 && groupAlpha > 0.01;
-    title.line.style.display = title.sub.style.display = visible ? '' : 'none';
-    if (!visible) continue;
-    title.words.forEach((word, i) => {
-      const k = spring(local - i * 0.075, 16, 7.5);
-      const out = easeIn((leaving - i * 0.03) / 0.22);
+function drawChapter(t, c, pal) {
+  // The title, while the footage waits at the start of the chapter.
+  const local = t - c.from - HERO_IN, leaving = t - c.until;
+  const heroOn = local > -0.05 && leaving < 0.3;
+  c.hero.style.display = heroOn ? '' : 'none';
+  if (heroOn) {
+    const n = easeOut(local / 0.3), nOut = easeIn(leaving / 0.16);
+    c.num.style.opacity = String(n * (1 - nOut));
+    c.num.style.transform = `translateY(${(1 - n) * 18 - nOut * 30}px)`;
+    c.words.forEach((word, i) => {
+      const k = spring(local - 0.06 - i * 0.075, 16, 7.5);
+      const out = easeIn((leaving - i * 0.025) / 0.16);
       const scale = Math.max(0, (0.35 + 0.65 * k) * (1 - out * 0.6));
-      const rot = (1 - k) * (i % 2 ? 9 : -9);
-      word.style.transform = `translateY(${(1 - k) * 46 + out * -30}px) rotate(${rot}deg) scale(${scale})`;
-      word.style.opacity = String(clamp(local / 0.12 - i * 0.5) * (1 - out) * groupAlpha);
+      word.style.transform = `translateY(${(1 - k) * 46 - out * 60}px) rotate(${(1 - k) * (i % 2 ? 9 : -9)}deg) scale(${scale})`;
+      word.style.opacity = String(clamp((local - 0.06) / 0.12 - i * 0.5) * (1 - out));
     });
-    const e = spring(local - title.words.length * 0.075 - 0.08, 14, 6);
-    const eOut = easeIn((leaving - 0.08) / 0.22);
-    const wiggle = Math.sin((local - 0.4) * 9) * 14 * Math.exp(-Math.max(0, local - 0.4) * 2.2) + Math.sin(local * 2.6) * 6;
-    title.emoji.style.transform = `rotate(${(1 - e) * -40 + wiggle}deg) scale(${Math.max(0, e * (1 - eOut))})`;
-    title.emoji.style.opacity = String(groupAlpha);
-    title.path.style.strokeDashoffset = String(title.length * (1 - easeOut((local - 0.35) / 0.45)));
-    title.path.style.opacity = String(1 - easeIn(leaving / 0.2));
-    const s = easeOut((local - 0.32) / 0.4), sOut = easeIn(leaving / 0.25);
-    title.sub.style.opacity = String(s * (1 - sOut) * groupAlpha);
-    title.sub.firstChild.style.transform = `translateY(${(1 - s) * 24 + sOut * -16}px)`;
+    const e = spring(local - 0.06 - c.words.length * 0.075 - 0.08, 14, 6), eOut = easeIn((leaving - 0.04) / 0.16);
+    const wiggle = Math.sin((local - 0.5) * 9) * 14 * Math.exp(-Math.max(0, local - 0.5) * 2.2) + Math.sin(local * 2.6) * 6;
+    c.emoji.style.transform = `rotate(${(1 - e) * -40 + wiggle}deg) scale(${Math.max(0, e * (1 - eOut))})`;
+    c.path.style.strokeDashoffset = String(200 * (1 - easeOut((local - 0.4) / 0.45)));
+    c.path.style.opacity = String(1 - easeIn(leaving / 0.14));
+    const s = easeOut((local - 0.38) / 0.4), sOut = easeIn(leaving / 0.16);
+    c.sub.style.opacity = String(s * (1 - sOut));
+    c.sub.style.transform = `translateY(${(1 - s) * 24 - sOut * 20}px)`;
+  }
+  // The chapter's name and its progress dots, through its steps.
+  const h = t - c.until - 0.2, hOut = t - c.next; // after the title's 'Part n of 5' has gone
+  const headOn = h > 0 && hOut < TEXT_OUT;
+  c.head.style.display = c.dots.style.display = headOn ? '' : 'none';
+  if (!headOn) return;
+  const k = easeOut(h / 0.35), o = 1 - easeIn(hOut / TEXT_OUT);
+  c.head.style.opacity = c.dots.style.opacity = String(k * o);
+  c.head.style.transform = `translateY(${(1 - k) * -18}px)`;
+  c.dotEls.forEach((dot, j) => {
+    const s0 = c.stepStarts[j], s1 = c.stepStarts[j + 1] ?? c.next;
+    const now = easeOut((t - s0) / 0.3) * (1 - easeOut((t - s1) / 0.3));
+    dot.style.width = `${20 + 32 * now}px`;
+    dot.style.background = css(blend(t >= s1 ? pal.dotDone : pal.dot, pal.hot, now));
+  });
+}
+function drawBand(t) {
+  const night = smooth(nightProgress(t) * 1.5 - 0.25);
+  const pal = Object.fromEntries(Object.keys(DAY).map((k) => [k, blend(rgb(DAY[k]), rgb(NIGHT[k]), night)]));
+  const stage = $('stage').style;
+  for (const [k, v] of Object.entries(pal)) stage.setProperty(`--${k.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}`, css(v));
+  const enter = spring(t - (INTRO - 0.45), 12, 7), leave = easeInOut((t - footageStop()) / 0.55);
+  const root = $('band');
+  root.style.display = enter <= 0.001 || leave >= 1 ? 'none' : '';
+  root.style.transform = `translateY(${(1 - enter) * -560 - leave * 580}px)`;
+  for (const mark of ORDER) drawChapter(t, band[mark], pal);
+  for (const b of stepBeats) {
+    const d = t - textAt(b), out = t - b.next;
+    const on = d > 0 && out < TEXT_OUT;
+    b.el.style.display = on ? '' : 'none';
+    if (!on) continue;
+    const k = spring(d, 15, 8), o = easeIn(out / TEXT_OUT);
+    b.el.style.opacity = String(clamp(d / 0.14) * (1 - o));
+    b.el.style.transform = `translateY(${(1 - k) * 44 - o * 36}px) scale(${(0.92 + 0.08 * k) * (1 - 0.04 * o)})`;
   }
 }
 
 // ---------------------------------------------------------------------------------------------
-// Camera: wide for captions and the finale; otherwise the phone fills the frame and glides to
-// wherever the next step happens. Precomputed with critically damped springs, frame by frame.
+// Camera: the phone stays put while a step plays and glides only during the pause before the
+// next one, so that step's button (or result) sits in view under the band.
 // ---------------------------------------------------------------------------------------------
 const local = (x, y) => [25 + x * PT, 25 + (STATUS + y) * PT]; // app point → phone element px
+const camTarget = (focus) => clamp((BAND_H + H) / 2 - (local(0, focus)[1] - ORIGIN_Y) * ZOOM, CY_BOTTOM, CY_TOP);
 function buildCamera() {
-  const wide = [[0, holdWindows[0][1]], ...holdWindows.slice(1, -1).map(([a, b]) => [a - 0.05, b]), [pauseAt('dark') - 0.05, Infinity]];
-  const isWide = (t) => wide.some(([a, b]) => t >= a && t < b);
-  const points = [
-    ...taps.map((e) => ({ t: e.t, y: e.y })),
-    ...drags.map((e) => ({ t: e.t, y: (e.y + e.y2) / 2 })),
-    ...notes.map((e) => ({ t: e.t, y: e.rect.y + Math.min(e.rect.h, 160) / 2 })),
-  ].map((p) => ({ out: outAt(p.t), y: p.y })).sort((a, b) => a.out - b.out);
-  const followY = (fy) => clamp(1010 - (local(0, fy)[1] - ORIGIN_Y) * FOLLOW, H - ORIGIN_Y * FOLLOW + 4, ORIGIN_Y * FOLLOW - 4);
-  const w = 6.2, dt = 1 / FPS;
-  let focus = 420, y = BASE.y, s = 1, vy = 0, vs = 0;
-  camera = [];
+  camera = new Float32Array(total);
+  let from = camTarget(steps[0].focus), to = from, moveStart = 0, moveDur = 1, i = 0;
   for (let n = 0; n < total; n++) {
     const t = n / FPS;
-    const next = points.find((p) => p.out >= t - 0.35);
-    if (next && next.out <= t + 1.4) focus = next.y;
-    const target = isWide(t) ? { y: BASE.y, s: 1 } : { y: followY(focus), s: FOLLOW };
-    vy += (w * w * (target.y - y) - 2 * w * vy) * dt; y += vy * dt;
-    vs += (w * w * (target.s - s) - 2 * w * vs) * dt; s += vs * dt;
-    camera.push({ y, s, follow: clamp((s - 1) / (FOLLOW - 1)) });
+    while (i < stepBeats.length && stepBeats[i].start <= t + 1e-6) {
+      const b = stepBeats[i++];
+      from = lerp(from, to, easeInOut((t - moveStart) / moveDur));
+      to = camTarget(b.step.focus); moveStart = b.start; moveDur = Math.min(0.62, b.end - b.start);
+    }
+    camera[n] = lerp(from, to, easeInOut((t - moveStart) / moveDur));
   }
 }
 function phonePose(t) {
-  const cam = camera[clamp(Math.round(t * FPS), 0, total - 1)];
-  let x = BASE.x, y = cam.y, s = cam.s, rx = 0, ry = 0, rz = 0;
-  const idle = 1 - cam.follow; // steady while following the action
-  y += Math.sin((t / 4.2) * Math.PI * 2) * 7 * idle;
-  rz += Math.sin((t / 5.3) * Math.PI * 2) * 0.55 * idle;
-  ry += Math.sin((t / 6.1) * Math.PI * 2 + 1) * 2.4 * idle;
-  rx += Math.sin((t / 4.7) * Math.PI * 2 + 2) * 1.5 * idle;
-  // Entrance: springs up from below with a tilt.
+  let x = 540, y = camera[clamp(Math.round(t * FPS), 0, total - 1)], s = ZOOM, rx = 0, ry = 0, rz = 0;
+  // While a chapter title is up, the phone steps back a touch and sways.
+  const v = veilAt(t);
+  s *= 1 - 0.03 * v; y += 10 * v;
+  ry += Math.sin((t / 6.1) * Math.PI * 2 + 1) * 2.2 * v; rx += Math.sin((t / 4.7) * Math.PI * 2 + 2) * 1.2 * v;
+  // Entrance: springs up from below with a tilt, as the band drops in.
   const enter = spring(t - (INTRO - 0.8), 10, 5.5);
   y += (1 - enter) * 1500; rx += (1 - enter) * 26; rz += (1 - enter) * -9; s *= lerp(0.88, 1, clamp(enter));
   // Ending: steps back and down so the title card can take over.
   const end = easeInOut((t - footageStop()) / 0.95);
-  y = lerp(y, 1540, end); s *= lerp(1, 0.6, end); rz += -5 * end; ry += 9 * end;
-  const hold = holdAmount(t);
-  s *= 1 - 0.035 * hold; y += 18 * hold;
+  y = lerp(y, 1540, end); s = lerp(s, 0.66, end); rz += -5 * end; ry += 9 * end;
   // Each tap gives the phone a tiny squish, as if it felt the finger.
-  for (const tapAt of tapTimes) { const d = t - tapAt; if (d > -0.05 && d < 0.3) s *= 1 - 0.006 * idle * Math.sin(clamp((d + 0.05) / 0.35) * Math.PI); }
-  return { x, y, s, rx, ry, rz, follow: cam.follow };
+  for (const tapAt of tapTimes) { const d = t - tapAt; if (d > -0.05 && d < 0.3) s *= 1 - 0.005 * Math.sin(clamp((d + 0.05) / 0.35) * Math.PI); }
+  return { x, y, s, rx, ry, rz };
 }
 let phoneMatrix;
 function placePhone(pose) {
@@ -337,7 +393,7 @@ function placePhone(pose) {
   phoneMatrix = new DOMMatrix().translate(ORIGIN_X, ORIGIN_Y).multiply(new DOMMatrix(list)).translate(-ORIGIN_X, -ORIGIN_Y);
   const shadow = $('shadow');
   shadow.style.transform = `translate(${pose.x - 380}px, ${pose.y + ORIGIN_Y * pose.s - 40}px) scale(${pose.s})`;
-  shadow.style.opacity = String(clamp(1 - Math.abs(pose.y - BASE.y) / 1400) * (1 - pose.follow));
+  shadow.style.opacity = String(clamp(1 - Math.abs(pose.y - 1200) / 1400));
 }
 /** Stage position of an app point, through the phone's 3D pose. */
 function project(x, y) {
@@ -347,7 +403,7 @@ function project(x, y) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The phone screen: captured frame + status bar + home indicator + the finger.
+// The phone screen: captured frame + status bar + home indicator + spotlight + the finger.
 // ---------------------------------------------------------------------------------------------
 const screen = $('screen').getContext('2d', { willReadFrequently: true });
 const SCALE = 3;
@@ -373,6 +429,48 @@ function statusBar(color) {
 }
 const lum = ([r, g, b]) => (0.299 * r + 0.587 * g + 0.114 * b) / 255;
 
+/** Dims the screen around the step's button (or result) with a pulsing ring, from its pause on. */
+function drawSpotlight(g, t, dark) {
+  let b = null;
+  for (const beat of stepBeats) { if (beat.start > t + 1e-6) break; b = beat; }
+  if (!b?.step.rect) return;
+  const amount = easeOut((t - b.start) / 0.25) * (1 - easeIn((t - b.spotEnd) / 0.22));
+  if (amount <= 0.003) return;
+  const r = b.step.rect, pad = 7;
+  const x = (r.x - pad) * SCALE, y = (r.y + STATUS - pad) * SCALE, w = (r.w + pad * 2) * SCALE, h = (r.h + pad * 2) * SCALE;
+  const radius = Math.min(22 * SCALE, w / 2, h / 2);
+  g.save();
+  g.fillStyle = dark ? `rgba(12, 7, 16, ${0.6 * amount})` : `rgba(58, 34, 50, ${0.5 * amount})`;
+  g.beginPath(); g.rect(0, 0, 1170, 2532); g.roundRect(x, y, w, h, radius); g.fill('evenodd');
+  const ring = dark ? '#f7b6cd' : '#f08aa8';
+  const grow = (1 - spring(t - b.start, 14, 7)) * 16 * SCALE; // the ring lands with a little bounce
+  g.strokeStyle = ring; g.globalAlpha = amount; g.lineWidth = 3.6 * SCALE;
+  g.beginPath(); g.roundRect(x - grow, y - grow, w + grow * 2, h + grow * 2, radius + grow); g.stroke();
+  const p = ((t - b.start) % 1.1) / 1.1, e = easeOut(p) * 15 * SCALE;
+  g.globalAlpha = amount * (1 - p) * 0.75; g.lineWidth = 2.6 * SCALE * (1 - p * 0.5);
+  g.beginPath(); g.roundRect(x - e, y - e, w + e * 2, h + e * 2, radius + e); g.stroke();
+  g.restore();
+}
+/** Before a swipe: a dotted track with an arrowhead and a ghost finger showing the way. */
+function drawSwipeHint(g, t, dark) {
+  const ring = dark ? '#f7b6cd' : '#c04f72';
+  for (const b of stepBeats) {
+    if (b.kind !== 'swipe' || t < b.start || t > b.end + 0.4) continue;
+    const a = easeOut((t - b.start) / 0.25) * (1 - easeIn((t - b.end - 0.1) / 0.3));
+    const { x, y, y2 } = b.step.e, X = x * SCALE, Y1 = (y + STATUS) * SCALE, Y2 = (y2 + STATUS) * SCALE, dir = Math.sign(Y2 - Y1);
+    g.save(); g.globalAlpha = a; g.strokeStyle = ring; g.lineCap = 'round'; g.lineJoin = 'round';
+    g.lineWidth = 6 * SCALE; g.setLineDash([0.01, 16 * SCALE]);
+    g.beginPath(); g.moveTo(X, Y1); g.lineTo(X, Y2 - dir * 20 * SCALE); g.stroke(); g.setLineDash([]);
+    g.lineWidth = 5 * SCALE;
+    g.beginPath(); g.moveTo(X - 17 * SCALE, Y2 - dir * 4 * SCALE); g.lineTo(X, Y2 + dir * 13 * SCALE); g.lineTo(X + 17 * SCALE, Y2 - dir * 4 * SCALE); g.stroke();
+    const p = ((t - b.start) % 1.1) / 1.1, fy = lerp(Y1, Y2, easeInOut(p));
+    g.globalAlpha = a * Math.sin(p * Math.PI);
+    g.fillStyle = dark ? 'rgba(255,240,246,.4)' : 'rgba(255,255,255,.7)';
+    g.beginPath(); g.arc(X, fy, 20 * SCALE, 0, 6.283); g.fill();
+    g.lineWidth = 3.2 * SCALE; g.stroke();
+    g.restore();
+  }
+}
 function drawFinger(g, s, night) {
   const ring = night ? '#f7b6cd' : '#c04f72';
   const fill = night ? 'rgba(255,240,246,.38)' : 'rgba(255,255,255,.62)';
@@ -424,55 +522,11 @@ async function drawScreen(s, t) {
   statusBar(dark ? '#fdf6f8' : '#20161c');
   g.fillStyle = lum(bottom) < 0.45 ? 'rgba(255,255,255,.75)' : 'rgba(30,20,26,.82)';
   g.beginPath(); g.roundRect(585 - 201, 2532 - 24 - 15, 402, 15, 7.5); g.fill();
+  drawSpotlight(g, t, dark);
+  drawSwipeHint(g, t, dark);
   drawFinger(g, s, dark);
-  const veil = holdAmount(t);
-  if (veil > 0) { g.fillStyle = dark ? `rgba(34,27,40,${0.3 * veil})` : `rgba(255,250,243,${0.3 * veil})`; g.fillRect(0, 0, 1170, 2532); }
-  return dark;
-}
-
-// ---------------------------------------------------------------------------------------------
-// Step labels: what each tap does, and what just happened, right next to it.
-// ---------------------------------------------------------------------------------------------
-let LABELS = [];
-function buildLabels() {
-  const items = events.filter((e) => e.label && (e.type === 'tap' || e.type === 'note')).map((e) => {
-    const tap = e.type === 'tap';
-    const start = outAt(e.t) - (tap ? 0.55 : 0.05);
-    return { text: tap ? e.label : `✓ ${e.label}`, tap, point: tap ? [e.x, e.y] : [e.rect.x + e.rect.w / 2, e.rect.y], start, end: start + (tap ? 2.0 : 2.2) };
-  }).sort((a, b) => a.start - b.start);
-  items.forEach((label, i) => {
-    if (items[i + 1]) label.end = Math.min(label.end, items[i + 1].start - 0.06);
-    const pause = holdWindows.find(([a]) => a > label.start); // a chapter's caption gets the stage to itself
-    if (pause) label.end = Math.min(label.end, pause[0] - 0.08);
-  });
-  LABELS = items;
-}
-function drawLabels(t, dark) {
-  fx.font = '800 50px Nunito'; fx.textAlign = 'center'; fx.textBaseline = 'middle';
-  for (const label of LABELS) {
-    const d = t - label.start, gone = t - label.end;
-    if (d < 0 || gone > 0.22) continue;
-    const k = spring(d, 16, 8), out = easeIn(gone / 0.22);
-    const [px, py] = project(...label.point);
-    const w = fx.measureText(label.text).width + 74, h = 96, gap = label.tap ? 128 : 80;
-    const below = py - gap - h / 2 < 60;
-    const cy = below ? py + gap : py - gap;
-    const cx = clamp(px, w / 2 + 24, W - w / 2 - 24);
-    const bgColor = label.tap ? (dark ? '#fff2e9' : '#3f2c39') : (dark ? '#f3b5cc' : '#b64967');
-    const ink = label.tap ? (dark ? '#3d2133' : '#fff7f1') : (dark ? '#3d2133' : '#fff7f1');
-    fx.save();
-    fx.globalAlpha = clamp(d / 0.12) * (1 - out);
-    fx.translate(cx, cy); fx.scale((0.72 + 0.28 * k) * (1 - 0.12 * out), (0.72 + 0.28 * k) * (1 - 0.12 * out));
-    fx.shadowColor = 'rgba(60, 25, 45, .28)'; fx.shadowBlur = 26; fx.shadowOffsetY = 10;
-    fx.fillStyle = bgColor;
-    fx.beginPath(); fx.roundRect(-w / 2, -h / 2, w, h, h / 2); fx.fill();
-    // A little pointer toward the finger (or the thing that changed).
-    const tipX = clamp(px - cx, -w / 2 + 46, w / 2 - 46), dir = below ? -1 : 1;
-    fx.beginPath(); fx.moveTo(tipX - 18, dir * (h / 2 - 2)); fx.lineTo(tipX, dir * (h / 2 + 18)); fx.lineTo(tipX + 18, dir * (h / 2 - 2)); fx.fill();
-    fx.shadowColor = 'transparent';
-    fx.fillStyle = ink; fx.fillText(label.text, 0, 2);
-    fx.restore();
-  }
+  const veil = veilAt(t);
+  if (veil > 0) { g.fillStyle = dark ? `rgba(34,27,40,${0.34 * veil})` : `rgba(255,250,243,${0.34 * veil})`; g.fillRect(0, 0, 1170, 2532); }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -521,7 +575,7 @@ function drawFx(t) {
     }
   }
   // Saved: hearts float up out of the button.
-  const save = events.find((e) => e.type === 'focus' && e.label === 'save')?.rect;
+  const save = focusRect('save');
   const th = outAt(ev('saved')) + 0.1, dh = t - th;
   if (save && dh > 0 && dh < 2.2) {
     const [hx, hy] = project(save.x + save.w / 2, save.y + save.h / 2);
@@ -536,7 +590,7 @@ function drawFx(t) {
     fx.globalAlpha = 1;
   }
   // Night: sleepy z's drift up from the blob in the header.
-  const avatar = events.find((e) => e.type === 'focus' && e.label === 'avatar')?.rect;
+  const avatar = focusRect('avatar');
   const tz = outAt(ev('night')) + 0.7, dz = t - tz;
   if (avatar && dz > 0 && t < footageStop() + 0.4) {
     const [ax, ay] = project(avatar.x + avatar.w / 2, avatar.y + avatar.h / 2);
@@ -565,10 +619,10 @@ function poseScoop(box, { wave = 0, blink = false } = {}) {
   box.querySelector('.eyes')?.setAttribute('transform', blink ? 'translate(0 98) scale(1 .12) translate(0 -98)' : '');
 }
 function textBlock(className, text, top) {
-  const el = document.createElement('div'); el.className = `copy ${className}`; el.style.top = `${top}px`;
-  if (className.includes('wordmark')) for (const ch of text) { const s = document.createElement('span'); s.textContent = ch === ' ' ? ' ' : ch; el.append(s); }
-  else el.innerHTML = text;
-  return el;
+  const node = document.createElement('div'); node.className = `copy ${className}`; node.style.top = `${top}px`;
+  if (className.includes('wordmark')) for (const ch of text) { const s = document.createElement('span'); s.textContent = ch === ' ' ? ' ' : ch; node.append(s); }
+  else node.innerHTML = text;
+  return node;
 }
 let intro, outro;
 function buildCards() {
@@ -618,9 +672,9 @@ function drawOutro(t) {
     ch.style.transform = `translateY(${(1 - c) * 50}px) rotate(${(1 - c) * (i % 2 ? 10 : -10)}deg) scale(${Math.max(0, c)})`;
     ch.style.opacity = String(clamp((d - 0.5 - i * 0.04) / 0.1));
   });
-  for (const [el, delay] of [[outro.tag, 1.05], [outro.pill, 1.3], [outro.url, 1.5]]) {
+  for (const [node, delay] of [[outro.tag, 1.05], [outro.pill, 1.3], [outro.url, 1.5]]) {
     const p = easeOut((d - delay) / 0.45);
-    el.style.opacity = String(p); el.style.transform = `translateY(${(1 - p) * 28}px)`;
+    node.style.opacity = String(p); node.style.transform = `translateY(${(1 - p) * 28}px)`;
   }
   // Hearts and sparkles stay in the margins and around Scoop, never on the words.
   const r = rng(99);
@@ -645,18 +699,16 @@ function buildCues() {
   cue(0.52, 'boing');
   [...'PantryScoop'].forEach((_, i) => cue(0.72 + (i + (i > 5 ? 1 : 0)) * 0.045, 'bloop', { i }));
   cue(INTRO - 0.95, 'whoosh', { dur: 0.75 });
-  for (const title of TITLES) {
-    title.words.forEach((_, i) => cue(title.from + i * 0.075, 'bloop', { i: i + 2 }));
-    cue(title.from + title.words.length * 0.075 + 0.08, 'pop');
+  for (const mark of ORDER) {
+    const c = band[mark];
+    c.words.forEach((_, i) => cue(c.from + HERO_IN + 0.06 + i * 0.075, 'bloop', { i: i + 2 }));
+    cue(c.from + HERO_IN + 0.06 + c.words.length * 0.075 + 0.08, 'pop');
   }
-  for (const [time, name] of [[pauseAt('scan'), 'scan'], [pauseAt('tidy'), 'tidy'], [pauseAt('recipes'), 'recipes'], [outAt(ev('night') + 0.5), 'night']]) cue(time, 'swap', { name });
-  for (const [, end] of holdWindows.slice(0, -1)) cue(end - 0.05, 'zoom'); // the camera moves in
-  for (const label of LABELS) cue(label.start, label.tap ? 'label' : 'sparkle');
+  for (const b of stepBeats) cue(textAt(b), b.kind === 'note' ? 'sparkle' : 'label');
   for (const tap of taps) cue(outAt(tap.t), 'tap');
   for (const drag of drags) { const a = outAt(drag.t); cue(a, 'swish', { dur: outAt(drag.t + drag.ms / 1000) - a }); }
   for (const typed of events.filter((e) => e.type === 'type')) [...typed.text].forEach((ch, i) => { if (ch !== ' ') cue(outAt(typed.t + (i * typed.perChar) / 1000), 'tick', { i }); });
-  const tp = outAt(ev('photo')) + 0.02;
-  cue(tp + 0.25, 'whoosh', { dur: 0.6 });
+  cue(outAt(ev('photo')) + 0.27, 'whoosh', { dur: 0.6 });
   cue(outAt(ev('ideas')) + 0.15, 'confetti');
   cue(outAt(ev('saved')) + 0.1, 'hearts');
   cue(outAt(ev('night') + 0.12), 'night');
@@ -664,7 +716,7 @@ function buildCues() {
   const end = footageStop();
   cue(end, 'whoosh', { dur: 0.9 });
   cue(end + 0.35, 'boing', { small: true });
-  [...'PantryScoop'].forEach((_, i) => cue(end + 0.15 + 0.5 + (i + (i > 5 ? 1 : 0)) * 0.04, 'bloop', { i }));
+  [...'PantryScoop'].forEach((_, i) => cue(end + 0.65 + (i + (i > 5 ? 1 : 0)) * 0.04, 'bloop', { i }));
   cue(end + 1.2, 'tada');
   return cues.sort((a, b) => a.t - b.t);
 }
@@ -675,34 +727,33 @@ async function setup() {
   events = cap.events;
   taps = events.filter((e) => e.type === 'tap');
   drags = events.filter((e) => e.type === 'swipe');
-  notes = events.filter((e) => e.type === 'note');
+  buildSteps();
   buildTimeline();
   scoopSvg = (await (await fetch('/app/assets/scoop-guide.svg')).text()).replace(/<style>[\s\S]*?<\/style>/, '');
   photoImg = await createImageBitmap(await (await fetch('/app/assets/pantry-editorial.webp')).blob());
-  await Promise.all([document.fonts.load('900 80px Nunito'), document.fonts.load('800 40px Nunito'), document.fonts.load('80px "Noto Color Emoji"', '🍋')]);
+  await Promise.all([document.fonts.load('900 80px Nunito'), document.fonts.load('800 40px Nunito'), document.fonts.load('80px "Noto Color Emoji"', '🍋👋📸✨🍝🌙')]);
   $('phone').style.width = `${PHONE_W}px`; $('phone').style.height = `${PHONE_H}px`;
   tapTimes = taps.map((tap) => outAt(tap.t));
-  buildTitles(); buildCamera(); buildLabels(); buildCards();
+  buildBand(); buildCamera(); buildCards();
   // Warm the sticker cache so the first frames do not stall.
-  for (const set of Object.values(SETS)) SLOTS.forEach(([, , size], i) => sticker(set[i], size));
+  for (const set of [INTRO_SET, NIGHT_SET]) SLOTS.forEach(([, , size], i) => sticker(set[i], size));
   await loadFrame(0);
   window.totalFrames = total;
   window.timeline = {
     total, intro: INTRO, footageStop: footageStop(), nightStart: outAt(ev('night') + 0.12), cues: buildCues(),
-    chapters: { onboarding: INTRO - 0.12, ...Object.fromEntries(['scan', 'tidy', 'recipes', 'dark'].map((m) => [m, pauseAt(m)])) },
-    labels: LABELS.map(({ text, start, end }) => ({ text, start, end })),
+    chapters: ORDER.map((mark) => ({ mark, name: CHAPTERS[mark].name, start: band[mark].from })),
+    steps: stepBeats.map((b) => ({ chapter: b.chapter, text: b.step.text, start: textAt(b) })),
   };
 }
 
 window.renderFrame = async (n) => {
   const t = n / FPS, s = srcAt(t);
   const pose = phonePose(t);
-  drawBackground(t, pose.follow);
+  drawBackground(t);
   placePhone(pose);
-  const dark = await drawScreen(s, t);
-  drawTitles(t, pose.follow);
+  await drawScreen(s, t);
+  drawBand(t);
   drawFx(t);
-  drawLabels(t, dark);
   drawIntro(t);
   drawOutro(t);
 };

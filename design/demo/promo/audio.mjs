@@ -155,7 +155,7 @@ for (let bar = 2; bar <= LAST_BAR; bar++) {
   if (!quiet) for (let k = 0; k < 8; k++) place(shaker(bar * 100 + k, k % 2 === 1), t0 + k * BEAT / 2, { gain: 0.05, pan: 0.35, send: 0.05 });
   // Melody on the glockenspiel and kalimba: phrases with breathing room.
   const phrase = (bar - 2) % 8;
-  const sing = !quiet && [2, 3, 4, 5, 8, 9, 10, 11, 12, 13, 16, 17, 18, 19].includes(bar);
+  const sing = !quiet && (bar - 2) % 6 < 4; // four bars on, two to breathe
   if (sing) for (const [b, m] of MELODY[phrase]) {
     place(kalimba(m, 0.9), t0 + b * BEAT, { gain: 0.1, pan: 0.18, send: 0.22 });
     place(glock(m + 12, 0.9), t0 + b * BEAT + 0.004, { gain: 0.022, pan: 0.3, send: 0.3 });
