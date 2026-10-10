@@ -3,17 +3,21 @@ import { api, SIGNED_OUT_EVENT } from './api.js';
 import { createLoginView } from './views/login.js';
 import { createProfileView } from './views/profile.js';
 import { createRecipesView } from './views/recipes.js';
+import { createShoppingView } from './views/shopping.js';
 import { createStockView } from './views/stock.js';
 import { h } from './dom.js';
 import { platform } from './platform.js';
+import { clearPendingLanguage, languageOfText, locale, pendingLanguage, recipeLanguage, setLanguage, t, translatePage } from './i18n.js';
+
+translatePage();
 
 const loginRoot = document.getElementById('view-login');
 const accountRoot = document.getElementById('account');
 const tabbar = document.querySelector('.tabbar');
 const loading = document.getElementById('app-loading');
 const pager = document.querySelector('.pages');
-const PAGES = ['stock', 'recipes', 'profile'];
-const TITLES = { stock: 'My pantry', recipes: 'Recipes', profile: 'My kitchen' };
+const PAGES = ['stock', 'recipes', 'shopping', 'profile'];
+const TITLES = { stock: t('My pantry'), recipes: t('Recipes'), shopping: t('Shopping list'), profile: t('My kitchen') };
 const pageOf = (name) => document.getElementById(`view-${name}`).parentElement;
 const calm = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 let views;
@@ -146,7 +150,7 @@ function showLogin({ consent = false, providerOnly } = {}) {
   signedIn = false;
   document.body.dataset.page = 'login';
   document.body.classList.remove('shell');
-  document.title = 'Pantry Scoop — Your everyday kitchen companion';
+  document.title = t('Pantry Scoop — Your everyday kitchen companion');
   pager.hidden = true;
   tabbar.hidden = true;
   accountRoot.replaceChildren();
@@ -171,6 +175,7 @@ function showApp(account, profile) {
   views ??= {
     stock: createStockView(document.getElementById('view-stock')),
     recipes: createRecipesView(document.getElementById('view-recipes')),
+    shopping: createShoppingView(document.getElementById('view-shopping')),
     profile: createProfileView(document.getElementById('view-profile'), { onSetupComplete: () => { location.hash = 'stock'; if (account.showPlanWelcome) showPlanWelcome(); } }),
   };
   const initial = location.hash.slice(1);
@@ -206,6 +211,25 @@ window.addEventListener('hashchange', () => {
   }
 });
 
+/**
+ * The account's recipe language and the interface language are one setting. A language picked on
+ * the sign-in screen is saved to the account; otherwise the account's language wins on this device.
+ * Returns true when the page reloads into another language.
+ */
+async function syncLanguage(profile) {
+  const picked = pendingLanguage();
+  if (picked) {
+    clearPendingLanguage();
+    if (languageOfText(profile.language) !== picked) {
+      profile.language = recipeLanguage(picked);
+      await api.updateProfile({ language: profile.language }).catch(() => {});
+    }
+    return false;
+  }
+  const saved = languageOfText(profile.language);
+  return !!saved && saved !== locale && setLanguage(saved);
+}
+
 /** Opened from the QR code shown on a signed-in computer: #link=<one-time token>. */
 async function consumeDeviceLink() {
   const token = new URLSearchParams(location.hash.slice(1)).get('link');
@@ -214,7 +238,7 @@ async function consumeDeviceLink() {
   try {
     await api.signInWithDeviceLink(token);
   } catch (error) {
-    alert(error.message);
+    alert(t(error.message));
   }
 }
 
@@ -230,13 +254,13 @@ try {
       location.replace('/auth/mobile/finish');
     } else {
       const { profile } = await api.getProfile();
-      showApp(account, profile);
+      if (!(await syncLanguage(profile))) showApp(account, profile);
     }
   }
 } catch (error) {
   if (error.code !== 'auth-required') {
     loading.hidden = true;
-    loginRoot.replaceChildren(h('div', { class: 'empty-state' }, h('h1', {}, 'Your kitchen is taking a moment.'), h('p', { class: 'problem', role: 'alert' }, error.message), h('button', { class: 'primary', onclick: () => location.reload() }, 'Try again')));
+    loginRoot.replaceChildren(h('div', { class: 'empty-state' }, h('h1', {}, t('Your kitchen is taking a moment.')), h('p', { class: 'problem', role: 'alert' }, error.message), h('button', { class: 'primary', onclick: () => location.reload() }, t('Try again'))));
     loginRoot.hidden = false;
   }
 }

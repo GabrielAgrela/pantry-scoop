@@ -1,4 +1,5 @@
 import { feel } from './blob-buddy.js';
+import { t, translateMessage } from './i18n.js';
 
 /**
  * Tiny element builder. Text is always inserted as text nodes, never parsed as HTML,
@@ -21,6 +22,7 @@ export function h(tag, attrs = {}, ...children) {
 }
 
 let toastTimer;
+let toastKey;
 let dialogSequence = 0;
 let lastPress;
 document.addEventListener('pointerdown', (event) => {
@@ -30,21 +32,48 @@ document.addEventListener('pointerdown', (event) => {
 
 export const MANAGE_USAGE_URL = 'https://chatgpt.com/settings/usage';
 
+/** `action` is a link ({ href, label }) or, with `onclick`, a button such as Undo. */
 export function toast(message, { error = false, action, mood } = {}) {
   const el = document.getElementById('toast');
-  el.replaceChildren(error ? '' : h('span', { class: 'toast-sparkle', 'aria-hidden': 'true' }, '✦'), message, action ? h('a', { class: 'toast-action', href: action.href, target: '_blank', rel: 'noopener' }, action.label) : '');
+  const dialog = [...document.querySelectorAll('dialog[open]:not(.is-closing)')].at(-1);
+  const key = JSON.stringify([message, error, action?.href, action?.label]);
+  // Repeated polling failures should neither re-announce nor extend a visible notice.
+  if (!el.hidden && toastKey === key) return;
+  // A routine confirmation must not erase an error the cook still needs to read.
+  if (!el.hidden && el.classList.contains('error') && !error) return;
+  if (dialog) dialog.prepend(el);
+  else document.querySelector('.app-header').after(el);
+  toastKey = key;
+  el.replaceChildren(error ? '' : h('span', { class: 'toast-sparkle', 'aria-hidden': 'true' }, '✦'),
+    h('span', { class: 'toast-message', role: error ? 'alert' : 'status' }, message,
+      action?.onclick ? h('button', { type: 'button', class: 'text-button toast-action', onclick: () => { dismissToast(); action.onclick(); } }, action.label)
+        : action ? h('a', { class: 'toast-action', href: action.href, target: '_blank', rel: 'noopener' }, action.label) : ''),
+    h('button', { type: 'button', class: 'toast-dismiss', 'aria-label': t('Dismiss notification'), onclick: dismissToast }, '×'));
   el.classList.toggle('error', error);
   el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (el.hidden = true), action ? 12000 : error ? 6000 : 3500);
+  toastTimer = setTimeout(dismissToast, action ? 12000 : error ? 6000 : 3500);
   feel(mood ?? (error ? 'sad' : 'happy'));
+}
+
+function dismissToast() {
+  clearTimeout(toastTimer);
+  const el = document.getElementById('toast');
+  const focused = el.contains(document.activeElement);
+  el.hidden = true;
+  toastKey = undefined;
+  if (focused) {
+    const target = el.closest('dialog')?.querySelector('button:not(.toast-dismiss):not(:disabled), input, textarea') ?? document.getElementById('main-content');
+    target?.focus({ preventScroll: true });
+  }
 }
 
 /** Shows an API error; a usage limit gets "Manage usage" as its primary action. */
 export function showError(error) {
   if (error.code === 'auth-required') return; // the sign-in screen takes over
-  const action = error.code === 'usage-limit' ? { label: 'Manage usage', href: error.manageUsageUrl ?? MANAGE_USAGE_URL } : undefined;
-  toast(error.message, { error: true, action });
+  const action = error.code === 'usage-limit' ? { label: t('Manage usage'), href: error.manageUsageUrl ?? MANAGE_USAGE_URL } : undefined;
+  // Errors raised in English outside the interface code (the Android shell, browsers) still read in the chosen language.
+  toast(translateMessage(error.message), { error: true, action });
 }
 
 /** Runs an async action while a button shows a busy label; reports failures as a toast. */
@@ -95,6 +124,9 @@ export function openDialog(className, ...content) {
   let closing = false;
   const finish = () => {
     if (!dialog.isConnected) return;
+    // Keep the shared notice mounted when its modal is removed.
+    const notice = dialog.querySelector('#toast');
+    if (notice) { dismissToast(); document.querySelector('.app-header').after(notice); }
     dialog.close();
     dialog.remove();
   };
@@ -115,6 +147,7 @@ export function openDialog(className, ...content) {
     if (event.target === dialog) close(); // tap outside
   });
   document.body.append(dialog);
+  dismissToast();
   dialog.showModal();
   return { dialog, close };
 }
@@ -132,9 +165,18 @@ function findOpener(key, dialog) {
   const same = (el) => el.className === key.className && (el.getAttribute('aria-label') ?? el.textContent.trim()) === key.label;
   const el = key.el.isConnected ? key.el : [...document.querySelectorAll(key.tag)].find(same);
   if (!el || dialog.contains(el) || el.closest('dialog.is-closing')) return undefined;
+  return visibleBox(el);
+}
+
+/** Some openers are see-through buttons filling a card or shelf row; the sheet lands on, and squishes, the box you can see. */
+function visibleBox(el) {
+  const box = el.matches('.recipe-open, .item-edit') ? el.parentElement.closest('.recipe-card, .item') ?? el : el;
+  return onScreen(box) ? box : undefined;
+}
+
+function onScreen(el) {
   const box = el.getBoundingClientRect();
-  const onScreen = box.width > 0 && box.height > 0 && box.bottom > 0 && box.top < window.innerHeight && box.right > 0 && box.left < window.innerWidth;
-  return onScreen ? el : undefined;
+  return box.width > 0 && box.height > 0 && box.bottom > 0 && box.top < window.innerHeight && box.right > 0 && box.left < window.innerWidth;
 }
 
 /** A small inhale, then the sheet shrinks and swoops into the element that opened it. */
