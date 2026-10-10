@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { AiAllowance, DailyAiLimit } from '../../src/application/daily-ai-limit.ts';
 import { JobService } from '../../src/application/job-service.ts';
 import { UsageLimitError } from '../../src/domain/errors.ts';
 import { openDatabase } from '../../src/infrastructure/db/database.ts';
+import { SqliteAiUsageRepository } from '../../src/infrastructure/db/sqlite-ai-usage-repository.ts';
 import { SqliteJobRepository } from '../../src/infrastructure/db/sqlite-job-repository.ts';
 import { accountRepos, identity } from '../fakes/fixtures.ts';
 
@@ -16,9 +18,10 @@ function setup() {
 
 describe('JobService', () => {
   it('records success and failure without blocking the caller', async () => {
-    const { repo } = setup();
+    const { db, userId, repo } = setup();
     const unexpected: unknown[] = [];
-    const jobs = new JobService(repo, (error) => unexpected.push(error));
+    const unlimited = new AiAllowance(new DailyAiLimit(new SqliteAiUsageRepository(db), 0), userId);
+    const jobs = new JobService(repo, unlimited, (error) => unexpected.push(error));
 
     const ok = jobs.start('recipes', { count: 1 }, async () => ({ recipes: [] }));
     const limited = jobs.start('scan', { photos: 1 }, async () => {

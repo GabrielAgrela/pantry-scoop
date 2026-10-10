@@ -21,7 +21,7 @@ export interface Config {
   readonly ownerEmail: string | undefined;
   /** Daily database backups kept in <data>/backups (0 = off). */
   readonly backupDays: number;
-  /** AI requests (scans, recipe batches, sorting) each person may make per UTC day (0 = unlimited). */
+  /** AI requests (one per thing they ask for: a scan, a recipe batch, a sort, a chat question…) each person may make per UTC day (0 = unlimited). */
   readonly dailyAiLimit: number;
   /** "Sign in with ChatGPT" website client from OpenAI; unset = open-source loopback flow. */
   readonly openai: {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { DailyAiLimit } from '../../src/application/daily-ai-limit.ts';
+import { AiAllowance, DailyAiLimit } from '../../src/application/daily-ai-limit.ts';
 import { DailyLimitError } from '../../src/domain/errors.ts';
 import { LimitedModel } from '../../src/infrastructure/ai/limited-model.ts';
 import { openDatabase } from '../../src/infrastructure/db/database.ts';
@@ -21,7 +21,7 @@ function setup(limit: number) {
   const model = { complete: async () => { if (fail) throw new Error('down'); return { ok: true }; } };
   return {
     a: a.id, b: b.id, aiLimit,
-    modelFor: (userId: number) => new LimitedModel(model, aiLimit, userId),
+    modelFor: (userId: number) => new LimitedModel(model, new AiAllowance(aiLimit, userId)),
     advance: (ms: number) => { now += ms; },
     failNext: (value: boolean) => { fail = value; },
   };

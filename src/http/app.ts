@@ -7,7 +7,7 @@ import type { AuthService } from '../application/auth-service.ts';
 import type { ProfileService } from '../application/profile-service.ts';
 import type { RecipeService } from '../application/recipe-service.ts';
 import type { ScanService } from '../application/scan-service.ts';
-import type { DailyAiLimit } from '../application/daily-ai-limit.ts';
+import type { AiAllowance, DailyAiLimit } from '../application/daily-ai-limit.ts';
 import type { JobService } from '../application/job-service.ts';
 import type { IngredientClassificationService } from '../application/ingredient-classification-service.ts';
 import type { ConnectionsService } from '../application/connections-service.ts';
@@ -40,6 +40,8 @@ export interface AppServices {
   readonly profile: ProfileService;
   readonly jobs: JobService;
   readonly shopping: ShoppingService;
+  /** Their daily AI allowance: each route that asks the AI for something runs as one action of it. */
+  readonly ai: AiAllowance;
 }
 
 export interface AppContainer {
@@ -50,7 +52,7 @@ export interface AppContainer {
   readonly publicUrl?: string;
   /** Linked sign-in providers and the choice of intelligence. */
   readonly connections: ConnectionsService;
-  /** Each person's daily allowance of AI requests. */
+  /** Each person's daily allowance of AI requests (one per thing they ask for). */
   readonly aiLimit: DailyAiLimit;
 }
 

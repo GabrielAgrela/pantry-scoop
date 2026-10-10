@@ -6,6 +6,7 @@ import { after, before, beforeEach, describe, it } from 'node:test';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { AiUnavailableError, AuthRequiredError, UsageLimitError } from '../../src/domain/errors.ts';
 import { buildApp } from '../../src/http/app.ts';
+import { SqliteJobRepository } from '../../src/infrastructure/db/sqlite-job-repository.ts';
 import { buildTestContainer, googleIdentity, identity, sampleRecipe, TINY_JPEG_DATA_URL } from '../fakes/fixtures.ts';
 
 let ctx: ReturnType<typeof buildTestContainer>;
@@ -689,13 +690,14 @@ describe('recipes API', () => {
   it('searches older batches, paginates matches and handles case, accents and literal punctuation', async () => {
     const session = await signIn('alice');
     const call = api(session);
-    const jobs = ctx.container.forUser(ctx.auth.userForSession(session)!.id).jobs;
+    // Stored directly: 65 batches would spend more than a day's AI requests.
+    const jobs = new SqliteJobRepository(ctx.db, ctx.auth.userForSession(session)!.id);
     const ids: number[] = [];
     for (let i = 0; i < 65; i++) {
       const recipe = sampleRecipe({ title: i < 12 ? `Crème & lemon ${i}` : `Pasta ${i}`,
         ingredients: [{ name: i === 0 ? 'Cócónut' : 'Basil', amount: '1 cup', inStock: false }] });
-      const job = jobs.start('recipes', {}, async () => ({ recipes: [recipe, sampleRecipe({ title: 'Unrelated dish' })] }));
-      await finished(call, job.id);
+      const job = jobs.create('recipes', {});
+      jobs.succeed(job.id, { recipes: [recipe, sampleRecipe({ title: 'Unrelated dish' })] });
       if (i < 12) ids.unshift(job.id);
     }
     const first = (await call('GET', '/api/recipes/history?search=CREME%20%26%20LEMON')).body;

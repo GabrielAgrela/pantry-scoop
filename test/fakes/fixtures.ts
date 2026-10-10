@@ -20,7 +20,7 @@ import type { KitchenProfile } from '../../src/domain/kitchen-profile.ts';
 import type { Recipe, RecipeText, SuggestionRequest } from '../../src/domain/recipe.ts';
 import type { OpenAiIdentity } from '../../src/domain/user.ts';
 import type { AppContainer, AppServices } from '../../src/http/app.ts';
-import { DailyAiLimit } from '../../src/application/daily-ai-limit.ts';
+import { AiAllowance, DailyAiLimit } from '../../src/application/daily-ai-limit.ts';
 import { SqliteAiUsageRepository } from '../../src/infrastructure/db/sqlite-ai-usage-repository.ts';
 import { openDatabase } from '../../src/infrastructure/db/database.ts';
 import {
@@ -264,7 +264,11 @@ export class FakeClassifier implements IngredientClassifier {
 }
 
 /** Feature services for one user, with fake AI. */
-export function servicesFor(db: DatabaseSync, userId: number, detector: FakeDetector, generator: FakeGenerator, classifier = new FakeClassifier(), language: LanguageCode = 'en'): AppServices {
+export function servicesFor(
+  db: DatabaseSync, userId: number, detector: FakeDetector, generator: FakeGenerator, classifier = new FakeClassifier(), language: LanguageCode = 'en',
+  aiLimit = new DailyAiLimit(new SqliteAiUsageRepository(db), 30, () => FIXED_NOW().getTime()),
+): AppServices {
+  const ai = new AiAllowance(aiLimit, userId);
   const stock = new StockService(new SqliteIngredientRepository(db, userId, FIXED_NOW));
   const profile = new ProfileService(new SqliteProfileRepository(db, userId), language);
   const jobs = new SqliteJobRepository(db, userId, FIXED_NOW);
@@ -272,10 +276,11 @@ export function servicesFor(db: DatabaseSync, userId: number, detector: FakeDete
     stock,
     classification: new IngredientClassificationService(classifier, stock),
     profile,
-    jobs: new JobService(jobs),
     scan: new ScanService(detector, stock),
     recipes: new RecipeService(generator, stock, profile, new SqliteSavedRecipeRepository(db, userId, FIXED_NOW), jobs, new SqliteScoopMemoryRepository(db, userId, FIXED_NOW)),
+    jobs: new JobService(jobs, ai),
     shopping: new ShoppingService(new SqliteShoppingRepository(db, userId, FIXED_NOW), stock),
+    ai,
   };
 }
 
@@ -327,12 +332,13 @@ export function buildTestContainer(
     googleAvailable: google !== undefined,
     deepseekAvailable: options.deepseek !== false,
   });
+  const aiLimit = new DailyAiLimit(new SqliteAiUsageRepository(db), 30, now);
   const container: AppContainer = {
     auth,
     account: new AccountService(repos.users, repos.connections, catalog),
     connections,
-    aiLimit: new DailyAiLimit(new SqliteAiUsageRepository(db), 30, now),
-    forUser: (userId, language) => servicesFor(db, userId, detector, generator, classifier, language),
+    aiLimit,
+    forUser: (userId, language) => servicesFor(db, userId, detector, generator, classifier, language, aiLimit),
   };
   return { db, repos, linked, openai, google: google!, detector, generator, classifier, catalog, auth, connections, container };
 }

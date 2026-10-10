@@ -41,7 +41,10 @@ export function ingredientRoutes(servicesOf: ServicesOf): FastifyPluginAsync {
       });
     });
 
-    app.post('/classify-other', async (request) => servicesOf(request).classification.classifyOther());
+    app.post('/classify-other', async (request) => {
+      const { classification, ai } = servicesOf(request);
+      return ai.act(() => classification.classifyOther());
+    });
 
     app.post('/', async (request, reply) => {
       const body = bodyObject(request.body);

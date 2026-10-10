@@ -26,7 +26,11 @@ export function recipeRoutes(servicesOf: ServicesOf): FastifyPluginAsync {
         throw new ValidationError('Invalid idea batches.');
       }
       const userId = request.userId;
-      const pass = translating.get(userId) ?? servicesOf(request).recipes.translate(batches as number[]).finally(() => translating.delete(userId));
+      const { recipes, ai } = servicesOf(request);
+      // The whole pass is one AI request, given back when nothing at all could be translated.
+      const pass = translating.get(userId)
+        ?? ai.act(() => recipes.translate(batches as number[]), (outcome) => !outcome.failed || outcome.saved > 0 || outcome.batches.length > 0)
+          .finally(() => translating.delete(userId));
       translating.set(userId, pass);
       return pass;
     });
@@ -44,10 +48,17 @@ export function recipeRoutes(servicesOf: ServicesOf): FastifyPluginAsync {
 
     app.get('/saved', async (request) => ({ recipes: servicesOf(request).recipes.listSaved() }));
 
-    app.post('/ask', { bodyLimit: 256 * 1024 }, async (request) => ({ answer: await servicesOf(request).recipes.ask(bodyObject(request.body)) }));
+    app.post('/ask', { bodyLimit: 256 * 1024 }, async (request) => {
+      const { recipes, ai } = servicesOf(request);
+      return { answer: await ai.act(() => recipes.ask(bodyObject(request.body))) };
+    });
 
     /** Scoop's reply to feedback and the notes it proposes; nothing is remembered until POST /memories. */
-    app.post('/feedback', { bodyLimit: 256 * 1024 }, async (request) => servicesOf(request).recipes.reflect(bodyObject(request.body)));
+    app.post('/feedback', { bodyLimit: 256 * 1024 }, async (request) => {
+      const { recipes, ai } = servicesOf(request);
+      return ai.act(() => recipes.reflect(bodyObject(request.body)));
+    });
+    });
 
     app.get('/memories', async (request) => ({ memories: servicesOf(request).recipes.listMemories() }));
 

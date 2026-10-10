@@ -10,7 +10,7 @@ import { RecipeService } from './application/recipe-service.ts';
 import { ScanService } from './application/scan-service.ts';
 import { ShoppingService } from './application/shopping-service.ts';
 import { JobService } from './application/job-service.ts';
-import { DailyAiLimit } from './application/daily-ai-limit.ts';
+import { AiAllowance, DailyAiLimit } from './application/daily-ai-limit.ts';
 import { LimitedModel } from './infrastructure/ai/limited-model.ts';
 import { SqliteAiUsageRepository } from './infrastructure/db/sqlite-ai-usage-repository.ts';
 import { InMemorySignInTransactionStore } from './application/sign-in-transactions.ts';
@@ -102,10 +102,10 @@ export function createContainer({ config, db, cipher, openaiAuth, responses, goo
   const forUser = (userId: number, language: LanguageCode = 'en'): AppServices => {
     // Their ChatGPT plan or DeepSeek, as they chose (automatic: the plan when it can be used).
     const onDeepSeek = deepseek !== undefined && connectionsService.aiProvider(userId) === 'deepseek';
+    const ai = new AiAllowance(aiLimit, userId);
     const model = new LimitedModel(
       onDeepSeek ? deepseek : new ChatGptPlanModel(userId, { credentials, responses, catalog, users, defaultModel: config.chatgpt.model }),
-      aiLimit,
-      userId,
+      ai,
     );
     const effort = onDeepSeek
       ? { scan: config.deepseek.scanEffort, sort: config.deepseek.sortEffort, recipe: config.deepseek.recipeEffort }
@@ -117,8 +117,8 @@ export function createContainer({ config, db, cipher, openaiAuth, responses, goo
       stock,
       classification: new IngredientClassificationService(new AiIngredientClassifier(model, effort.sort), stock),
       profile,
-      jobs: new JobService(jobs, onJobError),
       scan: new ScanService(new AiIngredientDetector(model, effort.scan), stock),
+      jobs: new JobService(jobs, ai, onJobError),
       recipes: new RecipeService(
         new AiRecipeGenerator(model, effort.recipe),
         stock,
@@ -128,6 +128,7 @@ export function createContainer({ config, db, cipher, openaiAuth, responses, goo
         new SqliteScoopMemoryRepository(db, userId),
       ),
       shopping: new ShoppingService(new SqliteShoppingRepository(db, userId), stock),
+      ai,
     };
   };
 
