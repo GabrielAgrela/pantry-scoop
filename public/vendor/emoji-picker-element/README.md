@@ -4,6 +4,10 @@
   Source: https://github.com/nolanlawson/emoji-picker-element
 - `emojis-en.json`, `DATA-LICENSE`: emoji-picker-element-data 1.8.0, English
   Emojibase data, Apache-2.0. Source: https://github.com/nolanlawson/emoji-picker-element-data
+- `emojis-pt.json`, `emojis-es.json`, `emojis-fr.json`: the same package's `cldr` data for
+  Portuguese, Spanish and French, unmodified.
+- `i18n-pt.js` (upstream `i18n/pt_PT.js`), `i18n-es.js`, `i18n-fr.js`: the picker's interface
+  labels from emoji-picker-element 1.29.1, unmodified.
 
 Copied from the pinned npm package tarballs. In `picker.js`, the upstream
 `baseStyles` and `EXTRA_STYLES` have been extracted into `picker.css`, and the
