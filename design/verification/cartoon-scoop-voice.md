@@ -1,0 +1,9 @@
+# Cartoon Scoop voice — 2026-10-07
+
+- Web-only refinement: Kokoro `af_heart` remains the upstream voice. Each PCM buffer plays four semitones higher via Web Audio playbackRate (2^(4/12), approximately 1.26). This also increases delivery speed by 26%; it does not add an API call or wait for the entire audio file. No pitch-preserving time stretch or generated emotional intonation is claimed.
+- Scheduled buffer duration is divided by the playback rate, keeping consecutive chunks aligned. The effect remains constant across chunks. Existing automatic replies, saved mute state, cancellation and prevention of TTS requests while muted are unchanged.
+- TypeScript and all 329 tests pass (`npm run check`). The new regression check sends two half-second buffers before EOF, checks the four-semitone rate, exact adjacent start times, and completion only after final playback ends. Existing streaming and cancellation checks also pass.
+- Real OpenRouter PCM preview: 352,800 bytes, 7.35 seconds at the original rate; first chunk arrived in 2,909 ms. FFmpeg resampling creates a local audio preview with the same constant pitch/speed effect. Preview: `/home/gabi/.local/share/pantry-scoop/voice-preview/scoop-cartoon.wav`.
+- Auto-deployment passed checks and reported a healthy container. Public HTTPS `/js/kokoro-voice.js` matches the local file byte for byte.
+- Built-in Browser verification was attempted against the running authenticated in-memory QA server on port 3229. The exact task was attached to the host desktop using the required X authority; both fresh-tab attempts then timed out waiting for their webviews to attach. Actual browser interaction and audible playback remain unverified. No other browser was substituted.
+- Reference: [Web Audio playbackRate documentation](https://developer.mozilla.org/en-US/docs/Web/API/AudioBufferSourceNode/playbackRate).

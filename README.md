@@ -222,6 +222,38 @@ tools 36. Install them through Android Studio or Android's command-line tools, a
 npm run android:apk
 ```
 
+Ask Scoop includes tap-to-talk dictation and automatic spoken replies on the web. The small
+microphone button sits above Send. A speaker button in the chat header mutes or unmutes Scoop;
+that choice is remembered in the browser. Muting cancels current speech and prevents TTS
+generation requests for subsequent replies. Unmuting applies to new replies and does not replay
+previous messages.
+The web app uses the browser's speech recognizer for dictation and **Kokoro `af_heart`** through
+OpenRouter for read-aloud. Set `OPENROUTER_API_KEY` in `.env` and recreate the Compose service
+(`docker-compose up -d --build --force-recreate`) to enable the voice; the key stays on the server.
+OpenRouter credits are required. Read-aloud starts from incoming mono 24 kHz PCM chunks rather
+than waiting for the complete reply. OpenRouter currently buffers each Kokoro generation,
+so the server groups complete sentences (soft targets of 160 characters initially and 240
+afterwards), using marked clause boundaries only for unusually long sentences. It never cuts
+at an arbitrary word or inside a measurement. It prefetches one section ahead and streams
+their PCM audio in order; the player refills its queue while earlier buffers are still playing.
+With voice enabled, a fresh reply appears at its first audible sample, after any leading
+silence. Muted replies appear immediately, and muting while audio loads reveals the waiting
+reply. A speech failure keeps the reply held until the user mutes. Muting aborts both active
+and prefetched generations. Web Audio raises the voice by four semitones as each
+chunk plays, giving Scoop a brighter cartoon pitch and 26% quicker delivery without another
+API call or buffering the full reply. The authenticated speech endpoint limits text to 6,000
+characters and requests to 20 per user per minute, and disables reverse-proxy buffering.
+Android uses its system speech recognizer and text-to-speech engine through the local
+`PantryVoice` plugin. Recognition availability depends on the browser/device and may need a
+network connection. Microphone permission is requested only after tapping **Talk to Scoop**.
+Web dictation sends the completed question
+automatically when speech ends or the microphone is tapped again. Recognition errors, silence
+and cancelled sessions never send a question. Voice input closes the text keyboard and does
+not refocus the question field when recognition or the reply finishes. The web app enables audio during the Send or
+microphone tap, so a reply can speak when it arrives. Only fresh replies in the visible, open
+chat are spoken. Recording and speech stop when the chat closes or the app goes into the
+background, and cancelling speech also cancels the streaming request.
+
 The result is `dist/android/pantry-scoop-debug.apk`. This APK uses Android's development signing
 key. Store distribution requires a separately signed release build and your own signing key.
 

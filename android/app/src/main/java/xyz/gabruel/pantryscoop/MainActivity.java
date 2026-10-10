@@ -7,6 +7,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(PantryGoogleSignInPlugin.class);
+        registerPlugin(PantryVoicePlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

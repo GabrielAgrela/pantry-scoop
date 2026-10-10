@@ -1,5 +1,6 @@
 import { CapacitorHttp, registerPlugin } from '@capacitor/core';
 import { createNativeRequest } from './transport.js';
+import { createNativeVoice } from './voice.js';
 import { createHandoffReceiver, PENDING_SIGN_IN as PENDING, reloadSignedInApp, signInWithNativeGoogle } from './auth.js';
 import { App } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
@@ -8,10 +9,12 @@ import { Preferences } from '@capacitor/preferences';
 import { installPlatform } from '/js/platform.js';
 import { api } from '/js/api.js';
 import { h, openDialog, showError } from '/js/dom.js';
+import { t, translateMessage } from '/js/i18n.js';
 
 const SERVER = PANTRY_SERVER_URL;
 const SCAN = 'pantry.pending-photo-selection';
 const GoogleSignIn = registerPlugin('PantryGoogleSignIn');
+const Voice = registerPlugin('PantryVoice');
 const base64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
 const nativeRequest = createNativeRequest(SERVER, CapacitorHttp);
@@ -31,17 +34,17 @@ async function signIn({ provider, consent = false }) {
     body: JSON.stringify({ challenge, provider, consent }),
   });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Could not start sign-in.');
+  if (!response.ok) throw new Error(data.error ? translateMessage(data.error) : t('Could not start sign-in.'));
   await Preferences.set({ key: PENDING, value: JSON.stringify({ flow: data.flow, verifier, expiresAt: data.expiresAt }) });
   await Browser.open({ url: SERVER + data.browserPath });
 }
 
 function pairDialog() {
-  const input = h('input', { type: 'url', placeholder: 'Paste your phone sign-in link', 'aria-label': 'Phone sign-in link' });
+  const input = h('input', { type: 'url', placeholder: t('Paste your phone sign-in link'), 'aria-label': t('Phone sign-in link') });
   const problem = h('p', { class: 'problem', role: 'alert', hidden: true });
-  const submit = h('button', { type: 'submit', class: 'primary' }, 'Connect my pantry');
-  const { close } = openDialog('phone-pair', h('h3', {}, 'Connect your pantry'),
-    h('p', {}, 'On a signed-in device, choose “Sign in on your phone” and copy its link here.'),
+  const submit = h('button', { type: 'submit', class: 'primary' }, t('Connect my pantry'));
+  const { close } = openDialog('phone-pair', h('h3', {}, t('Connect your pantry')),
+    h('p', {}, t('On a signed-in device, choose “Sign in on your phone” and copy its link here.')),
     h('form', { class: 'stack', onsubmit: async (event) => {
       event.preventDefault();
       submit.disabled = true;
@@ -49,24 +52,24 @@ function pairDialog() {
       try {
         const link = new URL(input.value.trim());
         const token = new URLSearchParams(link.hash.slice(1)).get('link');
-        if (link.origin !== SERVER || link.pathname !== '/' || !token) throw new Error('Use a phone sign-in link from this Pantry Scoop server.');
+        if (link.origin !== SERVER || link.pathname !== '/' || !token) throw new Error(t('Use a phone sign-in link from this Pantry Scoop server.'));
         await api.signInWithDeviceLink(token);
         location.reload();
       } catch (error) { problem.textContent = error.message; problem.hidden = false; submit.disabled = false; }
-    } }, input, problem, submit), h('button', { onclick: close }, 'Cancel'));
+    } }, input, problem, submit), h('button', { onclick: close }, t('Cancel')));
 }
 
 async function mediaFiles(items) {
   return Promise.all(items.map(async (item) => {
-    if (!item.webPath) throw new Error('The photo picker did not return a readable photo.');
+    if (!item.webPath) throw new Error(t('The photo picker did not return a readable photo.'));
     const response = await fetch(item.webPath);
-    if (!response.ok) throw new Error('Could not read the selected photo.');
+    if (!response.ok) throw new Error(t('Could not read the selected photo.'));
     return response.blob();
   }));
 }
 
 async function pickPhotos(source, limit, jobId) {
-  if (limit < 1) throw new Error('This scan already has six photos.');
+  if (limit < 1) throw new Error(t('This scan already has six photos.'));
   await Preferences.set({ key: SCAN, value: JSON.stringify({ jobId }) });
   let items;
   try {
@@ -82,7 +85,7 @@ async function pickPhotos(source, limit, jobId) {
   return mediaFiles(items);
 }
 
-installPlatform({ native: true, request: nativeRequest, signIn, pickPhotos, signOut: () => GoogleSignIn.clearCredentialState() });
+installPlatform({ native: true, request: nativeRequest, signIn, pickPhotos, voice: createNativeVoice(Voice), signOut: () => GoogleSignIn.clearCredentialState() });
 
 let ready = false;
 let restored;
@@ -92,7 +95,7 @@ async function restorePhotos() {
   restored = undefined;
   const { value } = await Preferences.get({ key: SCAN });
   await Preferences.remove({ key: SCAN });
-  if (!result.success) { showError(new Error(result.error?.message || 'Photo selection did not finish.')); return; }
+  if (!result.success) { showError(new Error(result.error?.message || t('Photo selection did not finish.'))); return; }
   const files = await mediaFiles(result.methodName === 'takePhoto' ? [result.data] : result.data.results);
   window.dispatchEvent(new CustomEvent('pantry:restored-photos', { detail: { files, jobId: value ? JSON.parse(value).jobId : undefined } }));
 }

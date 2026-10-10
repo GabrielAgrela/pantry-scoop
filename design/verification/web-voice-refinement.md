@@ -1,0 +1,9 @@
+# Web voice refinement — 2026-10-07
+
+- Scope: web source, tests and documentation. No native source edits or Android build in this refinement.
+- Dictation submits the completed question when recognition ends, including a tap on Finish voice question. Interim text stays visible while listening. Silence, recognition errors, cancellation and late callbacks cannot submit a question.
+- The browser adapter ranks matching-language voices using available quality/name hints rather than preferring local synthesis. Scoop's voice selector includes Automatic and device-provided voices, with a preview and a saved preference. Playback uses normal speed and removes Markdown formatting from spoken text.
+- `npm run check`: TypeScript and 311 tests passed. Adapter tests cover final-only completion, duplicate end events, failed/interim recognition, natural-voice ranking, manual selection and voices loaded after initialization.
+- Deployment: healthy pantry-scoop container; public voice.js, recipe-chat.js and styles.css matched local bytes.
+- Built-in Browser verification remains incomplete. Exact host-local task attachment and a fresh tab successfully rendered the recipe list, but locator click, locator keyboard activation and accessibility keyboard preparation all timed out. A renderer crashed to the built-in crash page. Restarting the desktop app and reattaching the exact task did not restore usable control: fresh-tab creation timed out waiting for webview attachment, and rebinding the crashed tab was blocked by the Browser URL policy. No other browser was substituted.
+- Actual microphone recognition, audible voice quality, the new chat controls and their small-screen layout have not been verified in this refinement. The previous recipe-voice-listening.png depicts the earlier review-before-send behavior and is not evidence for this change.
