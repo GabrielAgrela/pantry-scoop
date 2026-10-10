@@ -1,4 +1,3 @@
-import { platform } from './platform.js';
 import { LANGUAGE_HEADER, locale, t, translateMessage } from './i18n.js';
 
 /** Error from the API, carrying the server's machine-readable `code` (e.g. "usage-limit"). */
@@ -17,7 +16,7 @@ export const PANTRY_CHANGED_EVENT = 'pantry:stock-changed';
 
 /** Single place that knows the HTTP API's shape. */
 async function request(method, url, body, { keepalive = false } = {}) {
-  const response = await platform.request(url, {
+  const response = await fetch(url, {
     method,
     headers: { [LANGUAGE_HEADER]: locale, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -51,11 +50,7 @@ export const api = {
   completeSignIn: (callbackUrl) => request('POST', '/api/auth/complete', { callbackUrl }),
   createDeviceLink: () => request('POST', '/api/account/device-links'),
   signInWithDeviceLink: (token) => request('POST', '/api/auth/device-link', { token }),
-  signOut: async () => {
-    const result = await request('POST', '/api/auth/sign-out');
-    await platform.signOut();
-    return result;
-  },
+  signOut: () => request('POST', '/api/auth/sign-out'),
   deleteAccount: () => request('DELETE', '/api/account'),
   getConnections: () => request('GET', '/api/connections'),
   setAi: (provider) => request('PUT', '/api/connections/ai', { provider }),

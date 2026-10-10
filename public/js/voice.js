@@ -1,4 +1,3 @@
-import { platform } from './platform.js';
 import { createKokoroVoice } from './kokoro-voice.js';
 import { LANGUAGE_HEADER, locale, t } from './i18n.js';
 
@@ -135,8 +134,7 @@ export function createBrowserVoice(env = globalThis) {
 }
 
 export const recipeVoice = () => {
-  if (platform.voice) return platform.voice;
   const voice = createKokoroVoice(createBrowserVoice(), globalThis,
-    (url, options) => platform.request(url, { ...options, headers: { ...options?.headers, [LANGUAGE_HEADER]: locale } }));
+    (url, options) => fetch(url, { ...options, headers: { ...options?.headers, [LANGUAGE_HEADER]: locale } }));
   return { ...voice, speak: options => voice.speak({ ...options, text: spokenText(options.text) }) };
 };

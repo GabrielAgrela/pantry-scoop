@@ -11,8 +11,6 @@ export interface GoogleAuthorizeParams {
 
 /** Google's OAuth/OIDC endpoints for "Sign in with Google" (identity only, no Google APIs). */
 export interface GoogleAuth {
-  /** Public web client ID used as the audience for Android Credential Manager. */
-  readonly clientId: string;
   authorizeUrl(params: GoogleAuthorizeParams): string;
   /** Returns the ID token; throws AuthRequiredError when Google refuses the code. */
   exchangeCode(input: { code: string; codeVerifier: string; redirectUri: string }): Promise<string>;

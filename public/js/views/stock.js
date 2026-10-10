@@ -3,7 +3,6 @@ import { scanReviewList } from '../scan-review.js';
 import { h, openDialog, showError, toast, withBusy } from '../dom.js';
 import { categoryLabel, SHELVES, SHELF_EMOJIS, shelvesFor } from '../categories.js';
 import { photoToDataUrl } from '../images.js';
-import { platform } from '../platform.js';
 import { smoothDetails } from '../smooth-details.js';
 import { hideReady, showReady } from '../ready-notice.js';
 import { latestJob, watchJob } from '../jobs.js';
@@ -101,19 +100,9 @@ export function createStockView(root) {
       h('p', { class: 'muted' }, t('Up to 6 photos. Review the ingredients before adding them.')));
   }
 
-  async function choosePhotos(source) {
-    if (!platform.native) { (source === 'camera' ? cameraInput : uploadInput).click(); return; }
-    try {
-      await processPhotos(await platform.pickPhotos(source, MAX_PHOTOS - (appendToJob?.request.photos ?? 0), appendToJob?.id));
-    } catch (error) { showError(error); }
+  function choosePhotos(source) {
+    (source === 'camera' ? cameraInput : uploadInput).click();
   }
-
-  if (platform.native) window.addEventListener('pantry:restored-photos', async ({ detail }) => {
-    try {
-      appendToJob = detail.jobId ? (await api.getJob(detail.jobId)).job : undefined;
-      await processPhotos(detail.files);
-    } catch (error) { showError(error); }
-  });
 
   async function onPhotos(event) {
     const files = [...event.target.files];

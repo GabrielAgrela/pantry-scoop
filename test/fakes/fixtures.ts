@@ -209,7 +209,6 @@ export function googleIdentity(subject = 'g-user-a', email = 'user-a@example.com
 
 /** Stands in for accounts.google.com: every code exchanges for `nextIdentity`. */
 export class FakeGoogleAuth implements GoogleAuth {
-  readonly clientId = 'google-test-client';
   nextIdentity: OpenAiIdentity = googleIdentity();
   /** When set, the next exchange fails with it (once). */
   exchangeError: Error | undefined;

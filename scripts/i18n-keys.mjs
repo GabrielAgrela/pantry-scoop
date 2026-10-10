@@ -1,5 +1,5 @@
 // Lists every English sentence the interface can show, so each language's dictionary can be
-// checked for gaps: t()/tn() literals in the browser and Android code, data-i18n markers in
+// checked for gaps: t()/tn() literals in the browser code, data-i18n markers in
 // HTML, and the server's error messages (shown to the user as they arrive).
 // Usage: node scripts/i18n-keys.mjs  → JSON array on stdout.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -16,7 +16,7 @@ const unescape = (text) => text.replace(/\\(.)/g, '$1');
 const keys = new Set();
 const add = (text) => { if (text && text.trim()) keys.add(text); };
 
-for (const file of [...files('public/js', /\.js$/), ...files('mobile', /\.js$/)]) {
+for (const file of files('public/js', /\.js$/)) {
   const source = readFileSync(join(root, file), 'utf8');
   for (const match of source.matchAll(new RegExp(String.raw`\bt\(\s*(?:${literal})`, 'g'))) add(unescape(match[1] ?? match[2]));
   for (const match of source.matchAll(/(?<!function )\btn\(/g)) {

@@ -124,7 +124,6 @@ export class AuthService {
     return this.deps.google !== undefined && this.deps.settings.googleRedirectUri !== undefined;
   }
 
-  get googleClientId(): string | undefined { return this.deps.google?.clientId; }
 
   /**
    * @param options.retainedClientId client ID issued to this browser by a sign-in whose exchange failed.
@@ -335,13 +334,6 @@ export class AuthService {
     const idToken = await google.exchangeCode({ code, codeVerifier: transaction.codeVerifier, redirectUri: settings.googleRedirectUri });
     const identity = await google.verifyIdToken(idToken, transaction.nonce);
     return this.sessionForGoogleIdentity(identity, transaction.linkUserId);
-  }
-
-  /** Credential Manager returns an ID token; verify it exactly like the web OAuth token. */
-  async completeNativeGoogleSignIn(idToken: string, nonce: string, linkUserId?: number): Promise<AppSession> {
-    if (!this.googleEnabled || !this.deps.google) throw new ValidationError('Google sign-in is not set up on this Pantry Scoop.');
-    const identity = await this.deps.google.verifyIdToken(idToken, nonce);
-    return this.sessionForGoogleIdentity(identity, linkUserId);
   }
 
   private sessionForGoogleIdentity(identity: OpenAiIdentity, linkUserId?: number): AppSession {

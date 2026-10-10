@@ -10,8 +10,6 @@ export const COOKIES = {
   account: 'ps_account',
   /** Client ID ChatGPT issued to a sign-in whose code exchange failed; the retry reuses it. */
   retryClient: 'ps_retry_client',
-  /** Pending browser-to-Android handoff (not an account credential). */
-  mobile: 'ps_mobile',
 } as const;
 
 export function cookieOptions(request: FastifyRequest, maxAgeSeconds: number): CookieSerializeOptions {

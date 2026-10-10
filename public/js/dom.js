@@ -72,7 +72,7 @@ function dismissToast() {
 export function showError(error) {
   if (error.code === 'auth-required') return; // the sign-in screen takes over
   const action = error.code === 'usage-limit' ? { label: t('Manage usage'), href: error.manageUsageUrl ?? MANAGE_USAGE_URL } : undefined;
-  // Errors raised in English outside the interface code (the Android shell, browsers) still read in the chosen language.
+  // Errors raised in English outside the interface code (browsers) still read in the chosen language.
   toast(translateMessage(error.message), { error: true, action });
 }
 

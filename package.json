@@ -28,19 +28,9 @@
     "service:logs": "journalctl --user -u pantry-scoop.service -f",
     "autodeploy:install": "systemctl --user link \"$PWD/deploy/pantry-scoop-autodeploy.service\" && systemctl --user daemon-reload && systemctl --user enable --now pantry-scoop-autodeploy.service",
     "autodeploy:logs": "journalctl --user -u pantry-scoop-autodeploy.service -f",
-    "autodeploy:status": "systemctl --user status pantry-scoop-autodeploy.service --no-pager",
-    "mobile:build": "node scripts/build-mobile.mjs",
-    "android:sync": "npm run mobile:build && cap sync android",
-    "android:open": "npm run android:sync && cap open android",
-    "android:apk": "npm run android:sync && node scripts/build-android.mjs"
+    "autodeploy:status": "systemctl --user status pantry-scoop-autodeploy.service --no-pager"
   },
   "dependencies": {
-    "@capacitor/android": "^8.5.2",
-    "@capacitor/app": "^8.1.2",
-    "@capacitor/browser": "^8.0.5",
-    "@capacitor/camera": "^8.2.5",
-    "@capacitor/core": "^8.5.2",
-    "@capacitor/preferences": "^8.0.1",
     "@fastify/cookie": "^11.1.2",
     "@fastify/rate-limit": "^11.2.0",
     "@fastify/static": "^10.1.5",
@@ -49,10 +39,8 @@
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
-    "@capacitor/cli": "8.4.3",
     "@types/node": "^26.6.4",
     "@types/qrcode": "^1.5.6",
-    "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
   }
 }

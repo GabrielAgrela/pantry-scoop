@@ -14,7 +14,7 @@ export const GOOGLE_JWKS_URL = 'https://www.googleapis.com/oauth2/v3/certs';
 const ISSUERS = ['https://accounts.google.com', 'accounts.google.com'];
 
 export class GoogleOAuthClient implements GoogleAuth {
-  readonly clientId: string;
+  private readonly clientId: string;
   private readonly clientSecret: string;
   private readonly jwks: JWTVerifyGetKey;
   private readonly fetch: FetchLike;

@@ -198,29 +198,7 @@ npm run typecheck  # tsc --noEmit
 npm run check      # both
 ```
 
-### Android and web: one frontend
-
-The website and Android app use the same screens, styles and application logic in `public/`.
-Capacitor bundles that directory into Android; `mobile/native.js` supplies native HTTP, camera,
-photo picker, browser sign-in and Back-button behavior through `public/js/platform.js`.
-The Node server remains the shared backend. Pantry edits, saved recipes, kitchen settings and
-server jobs belong to the same account on both platforms. AI features require connectivity.
-
-Develop features with `npm run dev` as usual. To package the current frontend for Android:
-
-```bash
-npm install
-npm run android:sync
-npm run android:open
-```
-
-Android builds require a **JDK 21** (including `javac`) and an Android SDK with platform/build
-tools 36. Install them through Android Studio or Android's command-line tools, and set
-`ANDROID_HOME` to the SDK directory. Then build an installable development APK:
-
-```bash
-npm run android:apk
-```
+### Voice
 
 Ask Scoop includes tap-to-talk dictation and automatic spoken replies on the web. The small
 microphone button sits above Send. A speaker button in the chat header mutes or unmutes Scoop;
@@ -243,8 +221,7 @@ and prefetched generations. Web Audio raises the voice by four semitones as each
 chunk plays, giving Scoop a brighter cartoon pitch and 26% quicker delivery without another
 API call or buffering the full reply. The authenticated speech endpoint limits text to 6,000
 characters and requests to 20 per user per minute, and disables reverse-proxy buffering.
-Android uses its system speech recognizer and text-to-speech engine through the local
-`PantryVoice` plugin. Recognition availability depends on the browser/device and may need a
+Recognition availability depends on the browser/device and may need a
 network connection. Microphone permission is requested only after tapping **Talk to Scoop**.
 Web dictation sends the completed question
 automatically when speech ends or the microphone is tapped again. Recognition errors, silence
@@ -253,63 +230,6 @@ not refocus the question field when recognition or the reply finishes. The web a
 microphone tap, so a reply can speak when it arrives. Only fresh replies in the visible, open
 chat are spoken. Recording and speech stop when the chat closes or the app goes into the
 background, and cancelling speech also cancels the streaming request.
-
-The result is `dist/android/pantry-scoop-debug.apk`. This APK uses Android's development signing
-key. Store distribution requires a separately signed release build and your own signing key.
-
-The current development APK is also available at
-https://pantry.gabruel.xyz/downloads/pantry-scoop-debug.apk for phone downloads.
-The nginx configuration in `deploy/nginx/pantry.gabruel.xyz.conf` serves only that file from
-`/var/www/pantry-scoop/android/`. After rebuilding, publish the new APK atomically:
-
-```bash
-sudo install -d -m 755 /var/www/pantry-scoop/android
-sudo install -m 644 dist/android/pantry-scoop-debug.apk /var/www/pantry-scoop/android/pantry-scoop-debug.apk.new
-sudo mv /var/www/pantry-scoop/android/pantry-scoop-debug.apk.new /var/www/pantry-scoop/android/pantry-scoop-debug.apk
-```
-
-With an emulator or Android phone connected, run the packaged-app smoke test from `android/`:
-
-```bash
-./gradlew :app:connectedDebugAndroidTest
-```
-
-This checks the real WebView, native API transport and shared sign-in screen. Camera capture and
-the provider's actual sign-in approval should also be tested on a physical phone before release.
-
-`mobile/config.json` selects the backend HTTPS origin (currently `https://pantry.gabruel.xyz`).
-For another instance, edit that file or set `MOBILE_SERVER_URL` while building. Only the public
-server address is packaged: `.env`, databases and provider credentials are never copied. Deploy
-the current Node backend before using Android's new sign-in endpoints. Cleartext HTTP is disabled.
-
-Android's **Continue with Google** opens Google's native account chooser through Credential
-Manager. The app sends its ID token to the same backend, which verifies Google's signature,
-audience, issuer, expiry and the server's one-time nonce before creating the session. The shared
-app then reloads to read that session. Google sign-in does not open a browser.
-
-In the **same Google Cloud project** as the website's web OAuth client, register an **Android**
-OAuth client (Google Auth Platform → Clients → Create client) with package
-`xyz.gabruel.pantryscoop` and the APK signing certificate's SHA-1. For the current development
-build the SHA-1 is `B9:AC:1D:90:D7:DD:87:42:42:5D:2D:88:D5:D6:A9:15:18:DF:07:30`.
-Credential Manager uses the existing `GOOGLE_CLIENT_ID` web client as its server audience;
-no new client secret is embedded in Android. Release or differently signed builds need their
-own matching Android registration. See [Google's setup guide](https://developer.android.com/identity/sign-in/credential-manager-siwg)
-and [client registration](https://support.google.com/cloud/answer/6158849).
-
-ChatGPT connects your plan through the system browser. After approving, tap **Continue in Android**,
-then **Open Pantry Scoop**. The return code works once, expires after ten minutes and requires the
-verifier held by the initiating Android app. Session cookies stay in Android's native cookie store;
-ChatGPT credentials stay on the server. Connecting another provider targets the Android account
-even if the system browser is signed into a different account.
-
-For the default loopback-only ChatGPT client, the browser uses the existing phone sign-in flow:
-complete the pasted callback there, then return to Android. Alternatively, use **Use a phone
-sign-in link** in Android and paste the link generated by a signed-in device. Google and registered
-ChatGPT clients return through the normal website callbacks.
-
-`npm run android:sync` recopies the shared frontend after edits. Generated bundles and copied
-assets are ignored by Git. Web deployment updates the website; bundled Android changes need a
-new APK. There is no second set of feature screens to maintain.
 
 ### Architecture
 
