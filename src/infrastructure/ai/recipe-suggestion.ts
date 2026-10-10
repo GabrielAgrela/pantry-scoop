@@ -96,14 +96,13 @@ function allowedAppliances(profile: KitchenProfile, request: SuggestionRequest):
   return profile.appliances.filter(({ name }) => !avoided.has(normalizeName(name))).map(({ name }) => name);
 }
 
-/** Check the model's declared equipment even when the provider does not enforce the schema. */
-export function assertRecipeEquipment(recipes: readonly Recipe[], allowed: readonly string[], required: readonly string[]): void {
+/**
+ * The recipes whose declared equipment respects the kitchen, checked even when the provider does not
+ * enforce the schema: only available appliances, and every required one.
+ */
+export function recipesWithinEquipment(recipes: readonly Recipe[], allowed: readonly string[], required: readonly string[]): Recipe[] {
   const known = new Set(allowed);
-  for (const recipe of recipes) {
-    if (recipe.equipment.some((name) => !known.has(name)) || required.some((name) => !recipe.equipment.includes(name))) {
-      throw new AiUnavailableError('The generated recipes did not respect your appliance choices. Please try again.');
-    }
-  }
+  return recipes.filter((recipe) => recipe.equipment.every((name) => known.has(name)) && required.every((name) => recipe.equipment.includes(name)));
 }
 
 const DIFFICULTY_LABELS: Record<Exclude<Difficulty, 'any'>, string> = {
@@ -236,15 +235,16 @@ export class AiRecipeGenerator implements RecipeGenerator {
   }
 
   async suggest(stock: readonly Ingredient[], profile: KitchenProfile, request: SuggestionRequest, pastTitles: readonly string[] = [], memories: readonly string[] = []): Promise<Recipe[]> {
+    const allowed = allowedAppliances(profile, request);
     const answer = await this.model.complete({
       prompt: buildRecipePrompt(stock, profile, request, pastTitles, memories),
       schemaName: 'recipe_suggestions',
-      schema: recipeSchema(profile.dishTypes.map((dish) => dish.name), allowedAppliances(profile, request)),
+      schema: recipeSchema(profile.dishTypes.map((dish) => dish.name), allowed),
       effort: this.effort,
     });
-    const recipes = parseRecipes(answer);
-    const allowed = allowedAppliances(profile, request);
-    assertRecipeEquipment(recipes, allowed, request.appliances);
+    // One recipe that breaks the kitchen's rules is dropped; the batch fails only when none is left.
+    const recipes = recipesWithinEquipment(parseRecipes(answer), allowed, request.appliances);
+    if (recipes.length === 0) throw new AiUnavailableError('The generated recipes did not respect your appliance choices. Please try again.');
     const review = await this.model.complete({
       schemaName: 'recipe_equipment_review', schema: EQUIPMENT_REVIEW_SCHEMA, effort: 'low',
       prompt: `Check the generated recipes below against the available appliances before they are shown to the cook.
@@ -259,8 +259,10 @@ ${JSON.stringify({ availableAppliances: allowed, requiredAppliances: request.app
     if (!Array.isArray(issues) || issues.some((issue) => !issue || !Number.isInteger(issue.recipeIndex) || issue.recipeIndex < 0 || issue.recipeIndex >= recipes.length || typeof issue.reason !== 'string' || !issue.reason.trim())) {
       throw new AiUnavailableError('The appliance check could not be completed. Please try again.');
     }
-    if (issues.length > 0) throw new AiUnavailableError('The generated instructions did not match your kitchen equipment. Please try again.');
-    return recipes;
+    const flagged = new Set(issues.map((issue) => issue.recipeIndex as number));
+    const reviewed = recipes.filter((_, index) => !flagged.has(index));
+    if (reviewed.length === 0) throw new AiUnavailableError('The generated instructions did not match your kitchen equipment. Please try again.');
+    return reviewed;
   }
 
   async reflect(recipe: Recipe, feedback: string, profile: KitchenProfile, memories: readonly string[], steering?: FeedbackSteering): Promise<FeedbackReflection> {

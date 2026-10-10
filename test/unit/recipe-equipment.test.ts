@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { DEFAULT_PROFILE } from '../../src/domain/kitchen-profile.ts';
-import { createSuggestionRequest } from '../../src/domain/recipe.ts';
+import { createSuggestionRequest, type Recipe } from '../../src/domain/recipe.ts';
 import { AiUnavailableError } from '../../src/domain/errors.ts';
 import { AiRecipeGenerator, EQUIPMENT_REVIEW_SCHEMA, recipeSchema } from '../../src/infrastructure/ai/recipe-suggestion.ts';
 import type { StructuredRequest } from '../../src/infrastructure/ai/structured-model.ts';
@@ -11,16 +11,18 @@ const profile = { ...DEFAULT_PROFILE, appliances: [{ name: 'Blender', details: '
 const request = createSuggestionRequest({ kind: 'Ice cream' }, profile);
 const sorbet = sampleRecipe({ title: 'Moscatel & Apple Sorbet with Nutmeg', equipment: ['Blender', 'Freezer'], steps: ['Blend the cooled apple with the syrup.', 'Churn in the ice-cream machine for 20–25 minutes.', 'Freeze for 2 hours.'] });
 
-function generator(recipe = sorbet, review: unknown = { issues: [] }) {
+function generator(recipe: Recipe | Recipe[] = sorbet, review: unknown = { issues: [] }) {
   const calls: StructuredRequest[] = [];
   return {
     calls,
     ai: new AiRecipeGenerator({ complete: async (call) => {
       calls.push(call);
-      return call.schemaName === 'recipe_equipment_review' ? review : { recipes: [recipe] };
+      return call.schemaName === 'recipe_equipment_review' ? review : { recipes: [recipe].flat() };
     } }, 'medium'),
   };
 }
+
+const freezerOnly = (title: string) => sampleRecipe({ title, equipment: ['Freezer'], steps: ['Freeze in a shallow tray, stirring by hand.'] });
 
 describe('recipe equipment enforcement', () => {
   it('restricts schema choices to available, non-excluded appliances', async () => {
@@ -71,6 +73,26 @@ describe('recipe equipment enforcement', () => {
     const { ai, calls } = generator(manual);
     assert.deepEqual(await ai.suggest([], profile, request), [manual]);
     assert.equal(calls.length, 2);
+  });
+
+  it('drops a recipe with mismatched declared equipment and keeps the rest', async () => {
+    const batch = [freezerOnly('Granita'), sampleRecipe({ title: 'Churned', equipment: ['Ice-cream machine'] }), freezerOnly('Semifreddo')];
+    const { ai, calls } = generator(batch);
+    assert.deepEqual((await ai.suggest([], profile, request)).map((recipe) => recipe.title), ['Granita', 'Semifreddo']);
+    // Only the surviving recipes are reviewed, so the reviewer's indexes refer to them.
+    assert.doesNotMatch(calls[1]!.prompt, /Churned/);
+  });
+
+  it('drops only the recipes the reviewer flags', async () => {
+    const batch = [freezerOnly('Granita'), sorbet, freezerOnly('Semifreddo')];
+    const { ai } = generator(batch, { issues: [{ recipeIndex: 1, reason: 'Churning requires an ice-cream machine.' }] });
+    assert.deepEqual((await ai.suggest([], profile, request)).map((recipe) => recipe.title), ['Granita', 'Semifreddo']);
+  });
+
+  it('fails when the reviewer flags every recipe', async () => {
+    const batch = [sorbet, { ...sorbet, title: 'Churned pear' }];
+    const issues = [0, 1].map((recipeIndex) => ({ recipeIndex, reason: 'Churning requires an ice-cream machine.' }));
+    await assert.rejects(generator(batch, { issues }).ai.suggest([], profile, request), /instructions did not match your kitchen equipment/);
   });
 
   it('fails closed if the review is unavailable or malformed, without returning unreviewed recipes', async () => {
