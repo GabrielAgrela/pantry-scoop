@@ -1,6 +1,7 @@
-import { calmMotion, h, toast, withBusy } from './dom.js';
+import { calmMotion, h, openDialog, withBusy } from './dom.js';
 import { load, save } from './store.js';
-import { emoji, icon, scoopSays } from './ui.js';
+import { emoji, icon } from './ui.js';
+import { localeTag, t, tn } from './i18n.js';
 
 /** Set once the cook has marked something used up from a recipe (or waved the tip away). */
 const STOCK_TIP_LEARNED = 'recipes.stockTipLearned';
@@ -10,39 +11,46 @@ const MAX_STOCK_NUDGES = 4;
 
 const range = (min, max) => (min === max ? `${min}` : `${min}–${max}`);
 
+/** Only bold markers are supported; recipe text is always inserted as text, never HTML. */
+function instructionText(step) {
+  return step.split(/\*\*([^*\n]+)\*\*/g).map((part, index) =>
+    index % 2 ? h('strong', {}, part) : part);
+}
+
 /** Recipes saved before dish types were editable carry a fixed id as their kind. */
 const LEGACY_KIND_LABELS = {
-  'ice-cream': 'Ice cream',
-  dessert: 'Dessert',
-  breakfast: 'Breakfast',
-  main: 'Dinner',
-  side: 'Side dish',
-  snack: 'Snack',
-  baking: 'Baking',
-  drink: 'Drink',
+  'ice-cream': t('Ice cream'),
+  dessert: t('Dessert'),
+  breakfast: t('Breakfast'),
+  main: t('Dinner'),
+  side: t('Side dish'),
+  snack: t('Snack'),
+  baking: t('Baking'),
+  drink: t('Drink'),
 };
 export const kindLabel = (kind) => LEGACY_KIND_LABELS[kind] ?? kind;
 
-const SERVING_YIELD = /(\d+)\s*(servings?|portions?|people|persons?)\b/i;
-const COUNTED_YIELD = /(?:^|\()\s*~?(\d+)\s+(?!ml\b|l\b|g\b|kg\b|cl\b|oz\b)([a-z]+)/i;
+// Recipes are written in the kitchen's language, so the yield words cover each supported one.
+const SERVING_YIELD = /(\d+)\s*(servings?|portions?|people|persons?|porç(?:ão|ões)|pessoas?|doses?|porci(?:ón|ones)|raci(?:ón|ones)|personas?|personnes?|parts?)(?!\p{L})/iu;
+const COUNTED_YIELD = /(?:^|\()\s*~?(\d+)\s+(?!(?:ml|l|g|kg|cl|oz)(?!\p{L}))(\p{L}+)/iu;
 
 /** The estimate covers the whole recipe. Newer recipes say how many portions it makes; older ones only say it in "makes". */
 function portion(recipe) {
   const serving = SERVING_YIELD.exec(recipe.makes);
   const counted = serving ?? COUNTED_YIELD.exec(recipe.makes);
   const count = recipe.estimate.portions > 0 ? recipe.estimate.portions : counted ? Number(counted[1]) : 0;
-  if (!count) return { count: 1, label: 'whole recipe', note: 'For the whole recipe' };
-  return { count, label: 'per portion', note: `Whole recipe ÷ ${counted && Number(counted[1]) === count ? `${count} ${counted[2]}` : count}` };
+  if (!count) return { count: 1, label: t('whole recipe'), note: t('For the whole recipe') };
+  return { count, label: t('per portion'), note: t('Whole recipe ÷ {portions}', { portions: counted && Number(counted[1]) === count ? `${count} ${counted[2]}` : count }) };
 }
 
-const grams = (value) => (value >= 10 ? String(Math.round(value)) : String(Math.round(value * 10) / 10));
+const grams = (value) => (value >= 10 ? Math.round(value) : Math.round(value * 10) / 10).toLocaleString(localeTag);
 const NUTRIENTS = [
-  ['💪', 'Protein', (e) => e.proteinGrams],
-  ['🍞', 'Carbs', (e) => e.carbsGrams],
-  ['🍬', 'Sugar', (e) => [e.sugarGramsMin, e.sugarGramsMax]],
-  ['🧈', 'Fat', (e) => e.fatGrams],
-  ['🌾', 'Fibre', (e) => e.fibreGrams],
-  ['🧂', 'Salt', (e) => e.saltGrams],
+  ['💪', t('Protein'), (e) => e.proteinGrams],
+  ['🍞', t('Carbs'), (e) => e.carbsGrams],
+  ['🍬', t('Sugar'), (e) => [e.sugarGramsMin, e.sugarGramsMax]],
+  ['🧈', t('Fat'), (e) => e.fatGrams],
+  ['🌾', t('Fibre'), (e) => e.fibreGrams],
+  ['🧂', t('Salt'), (e) => e.saltGrams],
 ];
 
 function nutritionBanner(recipe) {
@@ -50,11 +58,11 @@ function nutritionBanner(recipe) {
   const share = (value) => (Array.isArray(value) ? range(grams(value[0] / count), grams(value[1] / count)) : grams(value / count));
   const kcal = range(Math.round(recipe.estimate.kcalMin / count), Math.round(recipe.estimate.kcalMax / count));
   const nutrients = NUTRIENTS.map(([symbol, name, pick]) => [symbol, name, pick(recipe.estimate)]).filter(([, , value]) => value !== undefined && (!Array.isArray(value) || value.every((v) => v !== undefined)));
-  return h('section', { class: 'recipe-nutrition', 'aria-label': `Estimated nutrition, ${label}` },
+  return h('section', { class: 'recipe-nutrition', 'aria-label': t('Estimated nutrition, {basis}', { basis: label }) },
     h('div', { class: 'nutrition-hero' }, emoji('🔥'), h('strong', {}, kcal, h('small', {}, 'kcal'))),
     h('dl', { class: 'nutrition-grid' }, ...nutrients.map(([symbol, name, value]) => h('div', { class: 'nutrition-stat' },
       h('dt', {}, emoji(symbol), name), h('dd', {}, share(value), h('small', {}, 'g'))))),
-    h('p', { class: 'nutrition-note' }, h('span', {}, 'AI estimate'), h('span', { class: 'nutrition-per', title: note }, label)));
+    h('p', { class: 'nutrition-note' }, h('span', {}, t('AI estimate')), h('span', { class: 'nutrition-per', title: note }, label)));
 }
 
 /**
@@ -72,8 +80,8 @@ export function recipePages(recipe, { title, openTips, setInStock }) {
   const linkedAny = !!setInStock && recipe.ingredients.some((i) => i.pantryId !== undefined);
   const stockTip = linkedAny && !load(STOCK_TIP_LEARNED, false)
     ? h('div', { class: 'recipe-stock-tip' }, emoji('👆', 'tip-finger'),
-      h('p', {}, 'Using up the last of something? Tap its ', h('b', {}, 'In pantry'), ' badge to mark it out of stock.'),
-      h('button', { type: 'button', onclick: () => learnStockTip() }, 'Got it'))
+      h('p', {}, t('Using up the last of something? Tap its '), h('b', {}, t('In pantry')), t(' badge to mark it out of stock.')),
+      h('button', { type: 'button', onclick: () => learnStockTip() }, t('Got it')))
     : '';
   function learnStockTip() {
     if (!stockTip || !stockTip.isConnected) return;
@@ -87,8 +95,8 @@ export function recipePages(recipe, { title, openTips, setInStock }) {
   const paintCounts = () => {
     const missing = missingCount();
     missingChip.className = `chip ${missing ? 'warn' : 'ok'}`;
-    missingChip.replaceChildren(icon(missing ? 'pantry' : 'check'), missing ? `${missing} to buy` : 'All in your pantry');
-    ingredientCount.textContent = missing ? `${missing} of ${recipe.ingredients.length} to buy` : `${recipe.ingredients.length} ingredients`;
+    missingChip.replaceChildren(icon(missing ? 'pantry' : 'check'), missing ? t('{count} to buy', { count: missing }) : t('All in your pantry'));
+    ingredientCount.textContent = missing ? t('{count} of {total} to buy', { count: missing, total: recipe.ingredients.length }) : tn(recipe.ingredients.length, '{count} ingredient', '{count} ingredients');
   };
   paintCounts();
   function ingredientRow(ingredient, index) {
@@ -100,11 +108,11 @@ export function recipePages(recipe, { title, openTips, setInStock }) {
       const inStock = stocked[index];
       row.className = inStock ? 'available' : 'missing';
       badge.className = `ingredient-availability ${inStock ? 'available' : 'missing'}`;
-      badge.replaceChildren(icon(inStock ? 'check' : 'plus'), inStock ? 'In pantry' : 'To buy');
+      badge.replaceChildren(icon(inStock ? 'check' : 'plus'), inStock ? t('In pantry') : t('To buy'));
       if (linked) {
         badge.setAttribute('aria-pressed', String(inStock));
-        badge.setAttribute('aria-label', `${ingredient.name}: ${inStock ? 'in pantry. Mark as used up' : 'to buy. Mark as back in pantry'}`);
-        badge.title = inStock ? 'Used the last of it? Tap to mark as out of stock' : 'Got it again? Tap to put it back in your pantry';
+        badge.setAttribute('aria-label', inStock ? t('{name}: in pantry. Mark as used up', { name: ingredient.name }) : t('{name}: to buy. Mark as back in pantry', { name: ingredient.name }));
+        badge.title = inStock ? t('Used the last of it? Tap to mark as out of stock') : t('Got it again? Tap to put it back in your pantry');
       }
     };
     async function toggle() {
@@ -115,47 +123,47 @@ export function recipePages(recipe, { title, openTips, setInStock }) {
       paintCounts();
       pop(badge);
       learnStockTip();
-      toast(inStock ? `${ingredient.name} is back in your pantry` : `${ingredient.name} marked as out of stock`);
     }
     paint();
     painters[index] = paint;
     return row;
   }
-  // The pills sit in a single column beside the title, so the overview keeps its room for the summary and nutrition.
+  // Yield gets the title's width; long descriptions must not stretch a narrow pill column.
   title.classList.add('with-pills');
+  title.append(h('p', { class: 'recipe-yield' }, recipe.makes));
   title.append(h('div', { class: 'chips recipe-title-pills' },
     h('span', { class: 'chip' }, emoji('🍽️'), kindLabel(recipe.kind)),
-    h('span', { class: 'chip' }, icon('people'), recipe.makes),
-    h('span', { class: 'chip' }, icon('clock'), `${recipe.totalMinutes} min`),
+    h('span', { class: 'chip' }, icon('clock'), t('{count} min', { count: recipe.totalMinutes })),
     missingChip,
     ...appliancePills(recipe.equipment)));
-  const overview = h('section', { class: 'recipe-page recipe-overview', 'aria-label': 'Overview' },
+  const summaryText = h('p', { class: 'recipe-summary-text' }, recipe.summary);
+  const summaryMore = h('button', { type: 'button', class: 'recipe-summary-more', onclick: () => {
+    const note = openDialog('recipe-note', h('h3', {}, recipe.title), h('p', {}, recipe.summary), h('button', { class: 'primary', onclick: () => note.close() }, t('Back to recipe')));
+  } }, t('Read full note'), icon('chevron'));
+  const summary = h('div', { class: 'recipe-summary' }, summaryText, summaryMore);
+  // The complete note is always accessible, including when text size changes its wrapping.
+  const overview = h('section', { class: 'recipe-page recipe-overview', 'aria-label': t('Overview') },
     title,
-    scoopSays(recipe.summary, 'recipe-summary'),
+    summary,
     nutritionBanner(recipe));
-  const ingredients = h('section', { class: 'recipe-page recipe-ingredients', 'aria-label': 'Ingredients' },
-    h('div', { class: 'recipe-section-title' }, h('h5', {}, emoji('🧺'), 'Ingredients'), ingredientCount),
+  const ingredients = h('section', { class: 'recipe-page recipe-ingredients', 'aria-label': t('Ingredients') },
+    h('div', { class: 'recipe-section-title' }, h('h5', {}, emoji('🧺'), t('Ingredients')), ingredientCount),
     stockTip,
     h('ul', { class: 'recipe-ingredient-list' }, ...rows));
   if (stockTip) nudgeWhenSeen(ingredients, () => recipe.ingredients.findIndex((i, index) => i.pantryId !== undefined && stocked[index]), rows);
-  const method = h('section', { class: 'recipe-page recipe-method', 'aria-label': 'Method' },
-    h('div', { class: 'recipe-section-title' }, h('h5', {}, emoji('🥄'), 'Method'),
-      recipe.tips.length ? h('button', { type: 'button', class: 'tips-button', onclick: openTips }, emoji('💡'), `Tips ${recipe.tips.length}`) : ''),
-    h('ol', { class: 'recipe-step-list' }, ...recipe.steps.map((step, index) => h('li', {}, h('span', { class: 'step-number', 'aria-hidden': 'true' }, String(index + 1).padStart(2, '0')), h('p', {}, step)))));
+  const method = h('section', { class: 'recipe-page recipe-method', 'aria-label': t('Method') },
+    h('div', { class: 'recipe-section-title' }, h('h5', {}, emoji('🥄'), t('Method')),
+      recipe.tips.length ? h('button', { type: 'button', class: 'tips-button', onclick: openTips }, emoji('💡'), t('Tips {count}', { count: recipe.tips.length })) : ''),
+    h('ol', { class: 'recipe-step-list' }, ...recipe.steps.map((step, index) => h('li', {}, h('span', { class: 'step-number', 'aria-hidden': 'true' }, String(index + 1).padStart(2, '0')), h('p', {}, ...instructionText(step))))));
   return [overview, ingredients, method];
 }
 
-/** Two appliance pills at most; the second one counts the rest, which its tooltip names. */
+/** One compact tool pill opens the complete list, including on touch screens. */
 function appliancePills(equipment) {
-  const [first, second, ...rest] = equipment;
-  const pills = [first, second].filter(Boolean).map((name) => h('span', { class: 'chip' }, icon('appliance'), name));
-  if (rest.length) {
-    const more = h('b', { class: 'chip-more', 'aria-hidden': 'true' }, `+${rest.length}`);
-    pills[1].append(more);
-    pills[1].title = `Also uses: ${rest.join(', ')}`;
-    pills[1].setAttribute('aria-label', `${second}, plus ${rest.join(', ')}`);
-  }
-  return pills;
+  if (!equipment.length) return [];
+  return [h('button', { type: 'button', class: 'chip recipe-tools', title: equipment.join(', '), 'aria-label': t('Equipment: {list}', { list: equipment.join(', ') }), onclick: () => {
+    const tools = openDialog('recipe-tools-note', h('h3', {}, t('What you’ll use')), h('ul', { class: 'recipe-tip-list' }, ...equipment.map(name => h('li', {}, name))), h('button', { class: 'primary', onclick: () => tools.close() }, t('Back to recipe')));
+  } }, icon('appliance'), h('span', { class: 'recipe-tool-name' }, equipment[0]), equipment.length > 1 ? h('b', { class: 'chip-more' }, `+${equipment.length - 1}`) : '')];
 }
 
 export function recipeTips(recipe) {
