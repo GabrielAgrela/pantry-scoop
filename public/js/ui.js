@@ -1,6 +1,10 @@
 import { h } from './dom.js';
 
 const paths = {
+  microphone: ['M9 5a3 3 0 0 1 6 0v7a3 3 0 0 1-6 0Z', 'M5 10v2a7 7 0 0 0 14 0v-2', 'M12 19v3', 'M8 22h8'],
+  speaker: ['M3 9h4l5-4v14l-5-4H3Z', 'M16 8a6 6 0 0 1 0 8', 'M19 5a10 10 0 0 1 0 14'],
+  muted: ['M3 9h4l5-4v14l-5-4H3Z', 'M17 9l5 6', 'M22 9l-5 6'],
+  stop: ['M6 6h12v12H6Z'],
   sort: ['M8 4v16', 'm4 8 4-4 4 4', 'M16 4v16', 'm12 16 4 4 4-4'],
   unlink: ['M9 15l-2 2a4 4 0 0 1-6-6l2-2', 'm15 9 2-2a4 4 0 0 1 6 6l-2 2', 'M8 2v3', 'M2 8h3', 'M16 19v3', 'M19 16h3', 'm10 14 4-4'],
   trash: ['M3 6h18', 'M9 6V3h6v3', 'm5 6 1 15h12l1-15', 'M10 10v7', 'M14 10v7'],
@@ -66,20 +70,22 @@ export const emptyState = (symbol, title, copy) => h('div', { class: 'empty-stat
   h('h3', {}, title), h('p', {}, copy));
 
 export function dishEmoji(value) {
-  const name = value.toLowerCase();
-  for (const [pattern, symbol] of [[/ice.?cream|gelado|sorbet/, '🍨'], [/cake|baking|bake|bolo|muffin/, '🧁'], [/cookie|biscuit/, '🍪'], [/pasta|spaghetti|massa|noodle/, '🍝'], [/salad|salada/, '🥗'], [/soup|sopa|stew/, '🍲'], [/egg|breakfast|frittata|omelette|ovo/, '🍳'], [/dessert|chocolate|brownie|sobremesa/, '🍰'], [/drink|smoothie|sumo/, '🥤'], [/bread|toast|sandwich|pao/, '🥪'], [/pizza/, '🍕'], [/snack/, '🥨']]) {
+  // Dish names may be in any of the app's languages, so the patterns include their words too.
+  const name = value.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+  for (const [pattern, symbol] of [[/ice.?cream|gelado|helado|glace|sorbet|sorvete/, '🍨'], [/cake|baking|bake|bolo|muffin|pastel|bizcocho|gateau|patisserie|reposteria|pastelaria/, '🧁'], [/cookie|biscuit|bolacha|galleta/, '🍪'], [/pasta|spaghetti|massa|noodle|pates/, '🍝'], [/salad|salada|ensalada|salade/, '🥗'], [/soup|sopa|stew|soupe|caldo|guisado|ragout/, '🍲'], [/egg|breakfast|frittata|omelette|ovo|pequeno.almoco|huevo|desayuno|oeuf|petit.dejeuner|tortilla/, '🍳'], [/dessert|chocolate|brownie|sobremesa|postre/, '🍰'], [/drink|smoothie|sumo|bebida|boisson|batido/, '🥤'], [/bread|toast|sandwich|pao|pan\b|pain|tosta|bocadillo/, '🥪'], [/pizza/, '🍕'], [/snack|lanche|petisco|aperitivo|merienda|tentempie|en.cas|gouter/, '🥨']]) {
     if (pattern.test(name)) return symbol;
   }
   return '🍽️';
 }
 
-export function applianceEmoji(name) {
-  if (/ice.?cream|gelado/i.test(name)) return '🍨';
-  if (/freez|frigor|fridge/i.test(name)) return '🧊';
-  if (/blend|liquid/i.test(name)) return '🥤';
-  if (/oven|forno|fryer/i.test(name)) return '🥐';
-  if (/microwave/i.test(name)) return '🍱';
-  if (/hob|stove|fogao/i.test(name)) return '🍳';
-  if (/kettle|tea/i.test(name)) return '🫖';
+export function applianceEmoji(value) {
+  const name = value.normalize('NFD').replace(/\p{M}/gu, '');
+  if (/ice.?cream|gelado|helad|glace|sorbet/i.test(name)) return '🍨';
+  if (/freez|frigor|fridge|congel|nevera|refrigera|geladeira/i.test(name)) return '🧊';
+  if (/blend|liquid|licuadora|batidora|mixeur/i.test(name)) return '🥤';
+  if (/oven|forno|fryer|horno|four|friteuse|freidora|fritadeira/i.test(name)) return '🥐';
+  if (/microwave|micro.?ondas|micro.?onde/i.test(name)) return '🍱';
+  if (/hob|stove|fogao|placa|cocina|plaque|vitro|cuisiniere/i.test(name)) return '🍳';
+  if (/kettle|tea|chaleira|hervidor|bouilloire|cha\b/i.test(name)) return '🫖';
   return '🥣';
 }

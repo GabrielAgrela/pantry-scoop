@@ -3,30 +3,31 @@ import { signInWithGoogle } from './sign-in.js';
 import { blobBuddy, feel } from './blob-buddy.js';
 import { calmMotion, h, MANAGE_USAGE_URL, openDialog, showError, toast } from './dom.js';
 import { icon, pantryFriend } from './ui.js';
+import { localeTag, t, tn } from './i18n.js';
+import { languageSelect } from './language-picker.js';
 
-const manageUsageLink = (label = 'Manage usage') =>
+const manageUsageLink = (label = t('Manage usage')) =>
   h('a', { href: MANAGE_USAGE_URL, target: '_blank', rel: 'noopener' }, label);
 
 /** Header account menu: who is signed in, ChatGPT plan and model, then account actions. */
 export function renderAccount(root, account, { mode, onSignedOut, onEnablePlan, onRestoreDefaults }) {
   const { user, planUsageEnabled } = account;
-  const model = h('select', { 'aria-label': 'AI model', onchange: async () => {
+  const model = h('select', { 'aria-label': t('AI model'), onchange: async () => {
     try {
       await api.setModel(model.value);
-      toast('Model updated');
     } catch (error) {
       showError(error);
     }
-  } }, h('option', { value: '' }, 'Automatic'));
+  } }, h('option', { value: '' }, t('Automatic')));
   if (planUsageEnabled) loadModels(model, user.model);
 
   const signOut = async () => {
     const result = await api.signOut().catch(() => ({ revoked: false }));
-    if (!result.revoked) toast('Signed out. If you want to fully disconnect, remove Pantry Scoop in ChatGPT settings.');
+    if (!result.revoked) toast(t('Signed out. If you want to fully disconnect, remove Pantry Scoop in ChatGPT settings.'));
     onSignedOut();
   };
   const deleteAccount = async () => {
-    if (!confirm('Delete your account and everything in it? This can’t be undone.')) return;
+    if (!confirm(t('Delete your account and everything in it? This can’t be undone.'))) return;
     try {
       await api.deleteAccount();
       onSignedOut();
@@ -40,12 +41,12 @@ export function renderAccount(root, account, { mode, onSignedOut, onEnablePlan, 
   const aiSection = h('div', { class: 'menu-section', 'aria-busy': 'true' });
   const linkSection = h('div', { class: 'menu-section linked-accounts', hidden: true });
   const planRows = () => [
-    h('div', { class: 'plan' }, icon('check'), h('span', {}, 'Using your ChatGPT plan'),
-      h('a', { href: MANAGE_USAGE_URL, target: '_blank', rel: 'noopener', 'aria-label': 'Manage usage in ChatGPT' }, 'Usage', icon('external'))),
-    h('label', { class: 'model-field' }, h('span', {}, 'AI model'), model),
+    h('div', { class: 'plan' }, icon('check'), h('span', {}, t('Using your ChatGPT plan')),
+      h('a', { href: MANAGE_USAGE_URL, target: '_blank', rel: 'noopener', 'aria-label': t('Manage usage in ChatGPT') }, t('Usage'), icon('external'))),
+    h('label', { class: 'model-field' }, h('span', {}, t('AI model')), model),
   ];
   const disconnect = async (provider, name) => {
-    if (!confirm(`Disconnect ${name} from this account? You can connect it again later.`)) return;
+    if (!confirm(t('Disconnect {name} from this account? You can connect it again later.', { name }))) return;
     try {
       await api.disconnect(provider);
       location.reload();
@@ -57,8 +58,8 @@ export function renderAccount(root, account, { mode, onSignedOut, onEnablePlan, 
     h('div', { class: 'provider-row' },
       h('span', { class: connected ? 'provider on' : 'provider' }, connected ? icon('check') : '', name),
       connected
-        ? h('button', { class: 'link-button', onclick: () => disconnect(provider, name) }, 'Disconnect')
-        : h('button', { class: 'link-button', onclick: connect }, 'Connect'));
+        ? h('button', { class: 'link-button', onclick: () => disconnect(provider, name) }, t('Disconnect'))
+        : h('button', { class: 'link-button', onclick: connect }, t('Connect')));
   const fillConnections = async () => {
     let view;
     try {
@@ -71,25 +72,25 @@ export function renderAccount(root, account, { mode, onSignedOut, onEnablePlan, 
     document.body.dataset.ai = view.aiProvider;
     window.dispatchEvent(new CustomEvent('pantry:ai-changed'));
     const usingPlan = view.aiProvider === 'chatgpt';
-    const choice = h('select', { 'aria-label': 'Intelligence', onchange: async () => {
+    const choice = h('select', { 'aria-label': t('Intelligence'), onchange: async () => {
       try {
         const next = await api.setAi(choice.value);
-        toast(next.aiProvider === 'deepseek' ? 'Scans and recipes now use DeepSeek' : 'Scans and recipes now use ChatGPT');
+        toast(next.aiProvider === 'deepseek' ? t('Scans and recipes now use DeepSeek') : t('Scans and recipes now use ChatGPT'));
         fillConnections();
       } catch (error) {
         showError(error);
         choice.value = view.aiProvider;
       }
-    } }, h('option', { value: 'chatgpt' }, 'ChatGPT plan'), h('option', { value: 'deepseek' }, 'DeepSeek'));
+    } }, h('option', { value: 'chatgpt' }, t('ChatGPT plan')), h('option', { value: 'deepseek' }, 'DeepSeek'));
     choice.value = view.aiProvider;
     aiSection.replaceChildren(
-      view.deepseekAvailable ? h('label', { class: 'model-field' }, h('span', {}, 'Intelligence'), choice) : '',
+      view.deepseekAvailable ? h('label', { class: 'model-field' }, h('span', {}, t('Intelligence')), choice) : '',
       ...(usingPlan
         ? view.chatgptPlan ? planRows() : [enablePlanPrompt(onEnablePlan)]
-        : [h('div', { class: 'plan' }, icon('check'), h('span', {}, 'Using DeepSeek'))]),
+        : [h('div', { class: 'plan' }, icon('check'), h('span', {}, t('Using DeepSeek')))]),
     );
     linkSection.replaceChildren(
-      h('span', { class: 'muted menu-label' }, 'Sign in with'),
+      h('span', { class: 'muted menu-label' }, t('Sign in with')),
       providerRow('ChatGPT', view.chatgpt, onEnablePlan, 'chatgpt'),
       view.googleAvailable || view.google ? providerRow('Google', view.google, signInWithGoogle, 'google') : '',
     );
@@ -107,9 +108,9 @@ export function renderAccount(root, account, { mode, onSignedOut, onEnablePlan, 
       const left = Math.max(0, limit - used);
       usage.hidden = limit === 0;
       usage.classList.toggle('warn', left === 0);
-      usageCount.textContent = `${left}/${limit} AI requests left today`;
-      const resets = new Date(resetsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      usage.title = `Scans, recipe ideas and sorting each use one. Resets at ${resets}.`;
+      usageCount.textContent = tn(limit, '{left}/{count} AI request left today', '{left}/{count} AI requests left today', { left });
+      const resets = new Date(resetsAt).toLocaleTimeString(localeTag, { hour: '2-digit', minute: '2-digit' });
+      usage.title = t('Scans, recipe ideas and sorting each use one. Resets at {time}.', { time: resets });
     } catch { usage.hidden = true; }
   };
   void showUsage();
@@ -120,23 +121,24 @@ export function renderAccount(root, account, { mode, onSignedOut, onEnablePlan, 
   const buddy = blobBuddy(seed, { className: 'blob-big', speech: says, crop: 6 });
 
   const menu = h('details', { class: 'account-menu' },
-      h('summary', { 'aria-label': 'Account' },
+      h('summary', { 'aria-label': t('Account') },
         blobBuddy(seed, { className: 'avatar', crop: 13 }).el,
       ),
       h('div', { class: 'card menu' },
         h('div', { class: 'menu-section account-who' },
-          h('button', { type: 'button', class: 'blob-stage', 'aria-label': 'Poke your blob buddy', onclick: () => buddy.poke() }, buddy.el, says),
+          h('button', { type: 'button', class: 'blob-stage', 'aria-label': t('Poke your blob buddy'), onclick: () => buddy.poke() }, buddy.el, says),
           h('strong', {}, name || user.email),
           name ? h('span', { class: 'muted' }, user.email) : '',
           usage),
+        h('div', { class: 'menu-section' }, h('label', { class: 'model-field' }, h('span', {}, t('Language')), languageSelect({ signedIn: true }))),
         aiSection,
         linkSection,
         h('div', { class: 'menu-section menu-items' },
           // Only needed when ChatGPT can't send phones back here (open-source loopback flow).
-          mode === 'local' ? item('phone', 'Sign in on your phone', showPhoneQr) : '',
-          item('reset', 'Restart kitchen setup', onRestoreDefaults),
-          item('signout', 'Sign out', signOut),
-          h('button', { class: 'menu-item danger', onclick: deleteAccount }, icon('trash'), 'Delete account')),
+          mode === 'local' ? item('phone', t('Sign in on your phone'), showPhoneQr) : '',
+          item('reset', t('Restart kitchen setup'), onRestoreDefaults),
+          item('signout', t('Sign out'), signOut),
+          h('button', { class: 'menu-item danger', onclick: deleteAccount }, icon('trash'), t('Delete account'))),
       ),
     );
   // Opening is the fold played backwards: the avatar nods and the card springs out of it.
@@ -198,8 +200,8 @@ export function renderAccount(root, account, { mode, onSignedOut, onEnablePlan, 
 /** Shown when the user signed in but didn't allow plan usage. */
 function enablePlanPrompt(onEnable) {
   return h('div', { class: 'stack' },
-    h('span', {}, 'Allow ChatGPT plan use to scan and get recipes.'),
-    h('button', { class: 'primary chatgpt', onclick: onEnable }, 'Continue with ChatGPT'),
+    h('span', {}, t('Allow ChatGPT plan use to scan and get recipes.')),
+    h('button', { class: 'primary chatgpt', onclick: onEnable }, t('Continue with ChatGPT')),
   );
 }
 
@@ -207,12 +209,12 @@ function enablePlanPrompt(onEnable) {
 export function showPlanWelcome() {
   const { close } = openDialog('welcome',
     pantryFriend('welcome-friend'),
-    h('h3', {}, 'You’re using your ChatGPT plan'),
-    h('p', {}, manageUsageLink('Manage usage'), ' in ChatGPT settings.'),
+    h('h3', {}, t('You’re using your ChatGPT plan')),
+    h('p', {}, manageUsageLink(t('Manage usage')), t(' in ChatGPT settings.')),
     h('button', { class: 'primary', onclick: () => {
       close();
       api.dismissPlanWelcome().catch(() => {});
-    } }, 'Got it'),
+    } }, t('Got it')),
   );
 }
 
@@ -226,10 +228,10 @@ async function showPhoneQr() {
     return;
   }
   const { close } = openDialog('qr',
-    h('h3', {}, 'Scan with your phone'),
-    h('img', { src: link.qrDataUrl, alt: 'Sign-in QR code', width: 240, height: 240 }),
-    h('p', { class: 'muted' }, 'Same Wi-Fi · works once · 10 min'),
-    h('button', { class: 'primary', onclick: () => close() }, 'Done'),
+    h('h3', {}, t('Scan with your phone')),
+    h('img', { src: link.qrDataUrl, alt: t('Sign-in QR code'), width: 240, height: 240 }),
+    h('p', { class: 'muted' }, t('Same Wi-Fi · works once · 10 min')),
+    h('button', { class: 'primary', onclick: () => close() }, t('Done')),
   );
 }
 

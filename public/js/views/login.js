@@ -3,14 +3,16 @@ import { h, showError, withBusy } from '../dom.js';
 import { platform } from '../platform.js';
 import { isOnServerMachine, startOnServerMachine, startUrl } from '../sign-in.js';
 import { emoji, icon, pantryFriend } from '../ui.js';
+import { t } from '../i18n.js';
+import { languageSelect } from '../language-picker.js';
 
 /**
  * Sign-in screen. With `consent`, it re-runs sign-in asking ChatGPT to show the permission
  * screen again, for users who signed in without allowing plan usage.
  */
 export function createLoginView(root, { onSignedIn, consent = false, mode = 'local', google = false, providerOnly }) {
-  const pasteInput = h('input', { type: 'text', inputmode: 'url', autocomplete: 'off', autocapitalize: 'off', spellcheck: false, placeholder: 'http://127.0.0.1:…/auth/callback?code=…', 'aria-label': 'Address from the ChatGPT tab' });
-  const finish = h('button', { type: 'submit', class: 'primary' }, 'Finish signing in');
+  const pasteInput = h('input', { type: 'text', inputmode: 'url', autocomplete: 'off', autocapitalize: 'off', spellcheck: false, placeholder: 'http://127.0.0.1:…/auth/callback?code=…', 'aria-label': t('Address from the ChatGPT tab') });
+  const finish = h('button', { type: 'submit', class: 'primary' }, t('Finish signing in'));
   const problem = h('p', { class: 'problem', role: 'alert', hidden: true });
   // On a phone/other device the paste box is always shown: the user may come back to a fresh
   // copy of this page after approving in ChatGPT.
@@ -18,22 +20,22 @@ export function createLoginView(root, { onSignedIn, consent = false, mode = 'loc
     event.preventDefault();
     problem.hidden = true;
     finish.disabled = true;
-    finish.textContent = 'Checking…';
+    finish.textContent = t('Checking…');
     try {
       await api.completeSignIn(pasteInput.value);
       onSignedIn();
     } catch (error) {
-      problem.textContent = error.message;
+      problem.textContent = t(error.message);
       problem.hidden = false;
     } finally {
       finish.disabled = false;
-      finish.textContent = 'Finish signing in';
+      finish.textContent = t('Finish signing in');
     }
   } },
     h('ol', { class: 'steps' },
-      h('li', {}, h('a', { href: startUrl({ consent }), target: '_blank', rel: 'opener' }, 'Open ChatGPT sign-in'), ' and approve Pantry Scoop.'),
-      h('li', {}, 'Copy the address of the page that fails to load (127.0.0.1…).'),
-      h('li', {}, 'Paste it here.'),
+      h('li', {}, h('a', { href: startUrl({ consent }), target: '_blank', rel: 'opener' }, t('Open ChatGPT sign-in')), t(' and approve Pantry Scoop.')),
+      h('li', {}, t('Copy the address of the page that fails to load (127.0.0.1…).')),
+      h('li', {}, t('Paste it here.')),
     ),
     pasteInput,
     problem,
@@ -43,7 +45,7 @@ export function createLoginView(root, { onSignedIn, consent = false, mode = 'loc
       } catch {
         pasteInput.focus();
       }
-    }, hidden: !navigator.clipboard?.readText }, icon('pantry'), 'Paste from clipboard'),
+    }, hidden: !navigator.clipboard?.readText }, icon('pantry'), t('Paste from clipboard')),
     finish,
   );
 
@@ -52,29 +54,30 @@ export function createLoginView(root, { onSignedIn, consent = false, mode = 'loc
   root.append(
     h('div', { class: 'login-hero' },
       h('div', { class: 'login-copy' },
-        h('div', { class: 'login-eyebrow' }, emoji('🌷'), 'A little everyday delicious'),
-        h('h1', {}, consent ? 'Connect your ChatGPT plan' : ['Your kitchen,', h('em', {}, 'a little happier.')]),
-        h('p', { class: 'login-description' }, consent ? 'Allow plan usage for photo scans and recipe ideas.' : 'Keep your pantry together. Find something lovely to cook with what you already have.'), login,
-        h('div', { class: 'login-notes' }, h('span', {}, emoji('🧺'), 'Less food waste'), h('span', {}, emoji('🍓'), 'More good food'))),
+        h('div', { class: 'login-eyebrow' }, emoji('🌷'), t('A little everyday delicious')),
+        h('h1', {}, consent ? t('Connect your ChatGPT plan') : [t('Your kitchen,'), h('em', {}, t('a little happier.'))]),
+        h('p', { class: 'login-description' }, consent ? t('Allow plan usage for photo scans and recipe ideas.') : t('Keep your pantry together. Find something lovely to cook with what you already have.')), login,
+        h('div', { class: 'login-notes' }, h('span', {}, emoji('🧺'), t('Less food waste')), h('span', {}, emoji('🍓'), t('More good food'))),
+        h('label', { class: 'login-language' }, icon('globe'), languageSelect({ signedIn: false }))),
       h('div', { class: 'login-illustration', 'aria-hidden': 'true' }, h('div', { class: 'illustration-halo' }), pantryFriend('login-friend'),
         h('span', { class: 'food-sticker sticker-berry', 'aria-hidden': 'true' }, '🍓'),
         h('span', { class: 'food-sticker sticker-lemon', 'aria-hidden': 'true' }, '🍋'),
         h('span', { class: 'food-sticker sticker-bread' }, '🥐'),
         h('span', { class: 'illustration-spark spark-one' }, '✦'), h('span', { class: 'illustration-spark spark-two' }, '✧'),
-        h('span', { class: 'illustration-note' }, 'a happy little pantry'))),
+        h('span', { class: 'illustration-note' }, t('a happy little pantry')))),
   );
 
   if (platform.native) {
     const button = (provider, label, consent) => {
-      const el = h('button', { class: 'primary', onclick: () => withBusy(el, 'Opening sign-in…', () => platform.signIn({ provider, consent })) }, label);
+      const el = h('button', { class: 'primary', onclick: () => withBusy(el, t('Opening sign-in…'), () => platform.signIn({ provider, consent })) }, label);
       return el;
     };
-    if (google && !consent) login.append(button('google', 'Continue with Google'));
-    login.append(button('chatgpt', 'Continue with ChatGPT', consent),
+    if (google && !consent) login.append(button('google', t('Continue with Google')));
+    login.append(button('chatgpt', t('Continue with ChatGPT'), consent),
       h('p', { class: 'muted' }, google && !consent
-        ? 'Google signs in here. ChatGPT opens a secure browser to connect your plan.'
-        : 'Connect your ChatGPT plan in a secure browser, then return to Pantry Scoop.'),
-      h('button', { onclick: () => platform.signIn({ provider: 'pair' }).catch(showError) }, 'Use a phone sign-in link'));
+        ? t('Google signs in here. ChatGPT opens a secure browser to connect your plan.')
+        : t('Connect your ChatGPT plan in a secure browser, then return to Pantry Scoop.')),
+      h('button', { onclick: () => platform.signIn({ provider: 'pair' }).catch(showError) }, t('Use a phone sign-in link')));
     return;
   }
 
@@ -82,9 +85,9 @@ export function createLoginView(root, { onSignedIn, consent = false, mode = 'loc
   // Google returns to this site's public address, so it is one tap on every device.
   if (google && !consent) {
     login.append(
-      h('a', { class: 'button primary google', href: '/auth/google/start' }, googleMark(), 'Continue with Google'),
-      h('p', { class: 'muted' }, 'No ChatGPT plan needed: scans and recipes can run on DeepSeek.'),
-      h('div', { class: 'login-or', 'aria-hidden': 'true' }, 'or'),
+      h('a', { class: 'button primary google', href: '/auth/google/start' }, googleMark(), t('Continue with Google')),
+      h('p', { class: 'muted' }, t('No ChatGPT plan needed: scans and recipes can run on DeepSeek.')),
+      h('div', { class: 'login-or', 'aria-hidden': 'true' }, t('or')),
     );
   }
   if (providerOnly === 'google') return;
@@ -93,9 +96,9 @@ export function createLoginView(root, { onSignedIn, consent = false, mode = 'loc
   if (mode === 'registered' || isOnServerMachine()) {
     const start = () => (mode === 'registered' ? (location.href = startUrl({ consent })) : startOnServerMachine({ consent }));
     login.append(
-        h('button', { class: `${google && !consent ? '' : 'primary '}chatgpt`, onclick: start }, 'Continue with ChatGPT', icon('arrow')),
-        h('p', { class: 'muted' }, 'Photo scans and recipe ideas use your ChatGPT Plus or Pro plan.'),
-        consent ? h('a', { href: '/' }, 'Not now') : '',
+        h('button', { class: `${google && !consent ? '' : 'primary '}chatgpt`, onclick: start }, t('Continue with ChatGPT'), icon('arrow')),
+        h('p', { class: 'muted' }, t('Photo scans and recipe ideas use your ChatGPT Plus or Pro plan.')),
+        consent ? h('a', { href: '/' }, t('Not now')) : '',
     );
     return;
   }
@@ -104,13 +107,13 @@ export function createLoginView(root, { onSignedIn, consent = false, mode = 'loc
   // so phones join an account from there with a QR code.
   login.append(
       h('div', { class: 'card stack how' },
-        h('strong', {}, consent ? 'Connect your ChatGPT plan' : 'Bring your pantry to this device'),
+        h('strong', {}, consent ? t('Connect your ChatGPT plan') : t('Bring your pantry to this device')),
         h('ol', { class: 'steps' },
-          h('li', {}, 'Open Pantry Scoop on its host computer and sign in with ChatGPT.'),
-          h('li', {}, 'Choose “Sign in on your phone” in your account menu, then scan the QR code.'),
+          h('li', {}, t('Open Pantry Scoop on its host computer and sign in with ChatGPT.')),
+          h('li', {}, t('Choose “Sign in on your phone” in your account menu, then scan the QR code.')),
         ),
       ),
-      h('details', { class: 'fallback' }, h('summary', {}, 'Connect using a sign-in address'), pastePanel),
+      h('details', { class: 'fallback' }, h('summary', {}, t('Connect using a sign-in address')), pastePanel),
   );
 }
 

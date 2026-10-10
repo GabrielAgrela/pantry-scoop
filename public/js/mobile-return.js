@@ -1,3 +1,5 @@
+import { t } from './i18n.js';
+
 const button = document.getElementById('mobile-approve');
 const open = document.getElementById('mobile-open');
 const problem = document.getElementById('mobile-error');
@@ -13,7 +15,7 @@ button.addEventListener('click', async () => {
     button.hidden = true;
     open.focus();
   } catch (error) {
-    problem.textContent = error.message;
+    problem.textContent = t(error.message);
     problem.hidden = false;
     button.disabled = false;
   }

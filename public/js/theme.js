@@ -15,7 +15,8 @@
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.content = getComputedStyle(root).getPropertyValue('--bg').trim();
     const button = document.querySelector('.theme-toggle');
-    if (button) button.setAttribute('aria-label', isDark() ? 'Switch to light theme' : 'Switch to dark theme');
+    const label = isDark() ? 'Switch to light theme' : 'Switch to dark theme';
+    if (button) button.setAttribute('aria-label', globalThis.pantryT?.(label) ?? label); // set by i18n.js
   }
 
   // Clip the old snapshot once, then move that clip across the screen. Counter-translating

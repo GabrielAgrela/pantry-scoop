@@ -1,10 +1,11 @@
 import { h, openDialog } from './dom.js';
 import { categoryLabel, SHELF_EMOJIS, shelvesFor } from './categories.js';
 import { emoji, field, icon } from './ui.js';
+import { t } from './i18n.js';
 
 /** Local review edits stay drafts until the scan's single confirmation. */
 export function scanReviewList({ pending, ingredients, categories, automaticList, onChange }) {
-  const list = h('ul', { class: 'review-list', 'aria-label': 'Ingredients to review' });
+  const list = h('ul', { class: 'review-list', 'aria-label': t('Ingredients to review') });
   const calm = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)');
   const symbol = (item) => item.emoji || SHELF_EMOJIS[shelvesFor(categories).find((shelf) => shelf.categories.includes(item.category))?.id] || '🫙';
   const nodes = new Map();
@@ -61,21 +62,21 @@ export function scanReviewList({ pending, ingredients, categories, automaticList
     if (item.automaticDuplicate) return h('li', { class: 'automatic-match', dataset: { candidateId: item.candidateId } },
       h('div', { class: 'automatic-match-copy' },
         h('span', { class: 'match-twins', 'aria-hidden': 'true' }, emoji(symbol(item), 'match-twin-photo'), emoji(symbol(item), 'match-twin-pantry'), h('span', { class: 'match-question' }, '?')),
-        h('span', { class: 'match-name' }, h('small', {}, item.markedDuplicate ? 'Marked as duplicate' : 'Detected match'), h('strong', {}, item.name))),
+        h('span', { class: 'match-name' }, h('small', {}, item.markedDuplicate ? t('Marked as duplicate') : t('Detected match')), h('strong', {}, item.name))),
       item.markedDuplicate
-        ? h('button', { type: 'button', class: 'automatic-unmatch', 'aria-label': `Not duplicate: add ${item.name} again`, onclick: () => {
+        ? h('button', { type: 'button', class: 'automatic-unmatch', 'aria-label': t('Not duplicate: add {name} again', { name: item.name }), onclick: () => {
             Object.assign(item, { automaticDuplicate: false, markedDuplicate: false, selected: true }); changed(item, 'restored'); focusAction(item, 'duplicate');
-          } }, icon('unlink'), 'Not duplicate')
-        : h('button', { type: 'button', class: 'automatic-unmatch', 'aria-label': `Not duplicate: edit name of ${item.name}`, onclick: () => edit(item, true) }, icon('unlink'), 'Not duplicate'));
+          } }, icon('unlink'), t('Not duplicate'))
+        : h('button', { type: 'button', class: 'automatic-unmatch', 'aria-label': t('Not duplicate: edit name of {name}', { name: item.name }), onclick: () => edit(item, true) }, icon('unlink'), t('Not duplicate')));
     const row = h('li', { class: `review-list-item${item.deleted ? ' removed' : ''}${selected(item) ? '' : ' skipped'}${matched(item) ? ' matched' : ''}`, dataset: { candidateId: item.candidateId } });
     if (item.deleted) {
-      row.append(h('span', { class: 'removed-copy' }, `${item.name} removed`),
-        h('button', { type: 'button', class: 'text-button', dataset: { action: 'undo' }, 'aria-label': `Undo removal of ${item.name}`, onclick: () => {
+      row.append(h('span', { class: 'removed-copy' }, t('{name} removed', { name: item.name })),
+        h('button', { type: 'button', class: 'text-button', dataset: { action: 'undo' }, 'aria-label': t('Undo removal of {name}', { name: item.name }), onclick: () => {
           item.deleted = false; changed(item, 'restored'); focusAction(item);
-        } }, icon('back'), 'Undo'));
+        } }, icon('back'), t('Undo')));
       return row;
     }
-    const check = h('input', { type: 'checkbox', checked: selected(item), 'aria-label': `Include ${item.name}`, onchange: () => {
+    const check = h('input', { type: 'checkbox', checked: selected(item), 'aria-label': t('Include {name}', { name: item.name }), onchange: () => {
       item.selected = check.checked;
       if (!item.selected) detachDependents(item);
       row.classList.toggle('skipped', !item.selected);
@@ -92,14 +93,14 @@ export function scanReviewList({ pending, ingredients, categories, automaticList
     row.append(h('div', { class: 'review-item-main' },
       h('label', { class: 'review-checkbox' }, check, h('span', {}, icon('check'))),
       emoji(symbol(item), 'review-food-emoji'), copy));
-    if (item.separate && !matched(item)) row.append(h('div', { class: 'separate-badge' }, icon('spark'), 'Separate ingredient'));
+    if (item.separate && !matched(item)) row.append(h('div', { class: 'separate-badge' }, icon('spark'), t('Separate ingredient')));
     if (target) row.append(h('div', { class: 'duplicate-badge' }, icon('link'),
-      h('span', {}, `Same as ${target.name}`, h('small', {}, item.duplicateIngredientId !== undefined ? target.inStock ? 'Already in your pantry' : 'Will be restocked' : 'Added once from this scan')),
-      h('button', { type: 'button', class: 'icon', 'aria-label': `Unmark duplicate ${item.name}`, onclick: () => { clearMatch(item); changed(item, 'restored'); focusAction(item, 'duplicate'); } }, icon('close'))));
-    row.append(h('div', { class: 'review-row-actions', role: 'group', 'aria-label': `Actions for ${item.name}` },
-      h('button', { type: 'button', dataset: { action: 'edit' }, 'aria-label': `Edit detected ${item.name}`, onclick: () => edit(item) }, icon('edit'), 'Edit'),
+      h('span', {}, t('Same as {name}', { name: target.name }), h('small', {}, item.duplicateIngredientId !== undefined ? target.inStock ? t('Already in your pantry') : t('Will be restocked') : t('Added once from this scan'))),
+      h('button', { type: 'button', class: 'icon', 'aria-label': t('Unmark duplicate {name}', { name: item.name }), onclick: () => { clearMatch(item); changed(item, 'restored'); focusAction(item, 'duplicate'); } }, icon('close'))));
+    row.append(h('div', { class: 'review-row-actions', role: 'group', 'aria-label': t('Actions for {name}', { name: item.name }) },
+      h('button', { type: 'button', dataset: { action: 'edit' }, 'aria-label': t('Edit detected {name}', { name: item.name }), onclick: () => edit(item) }, icon('edit'), t('Edit')),
       // A duplicate is simply not added: it joins the possible duplicates, where it can be undone.
-      h('button', { type: 'button', dataset: { action: 'duplicate' }, 'aria-label': `Mark ${item.name} as duplicate`, onclick: async () => {
+      h('button', { type: 'button', dataset: { action: 'duplicate' }, 'aria-label': t('Mark {name} as duplicate', { name: item.name }), onclick: async () => {
         if (row.classList.contains('review-to-duplicates')) return;
         if (!calm?.matches) {
           row.classList.add('review-to-duplicates');
@@ -108,8 +109,8 @@ export function scanReviewList({ pending, ingredients, categories, automaticList
         detachDependents(item); clearMatch(item);
         Object.assign(item, { automaticDuplicate: true, markedDuplicate: true, selected: false });
         changed(item, 'marked');
-      } }, icon('link'), 'Mark duplicate'),
-      h('button', { type: 'button', class: 'review-delete', 'aria-label': `Delete detected ${item.name}`, onclick: async () => {
+      } }, icon('link'), t('Mark duplicate')),
+      h('button', { type: 'button', class: 'review-delete', 'aria-label': t('Delete detected {name}', { name: item.name }), onclick: async () => {
         if (row.classList.contains('review-removing')) return;
         item.deleted = true; detachDependents(item); onChange();
         if (!calm?.matches) {
@@ -117,33 +118,33 @@ export function scanReviewList({ pending, ingredients, categories, automaticList
           await Promise.allSettled(row.getAnimations().map((animation) => animation.finished));
         }
         render(); focusAction(item, 'undo');
-      } }, icon('trash'), 'Delete')));
+      } }, icon('trash'), t('Delete'))));
     return row;
   }
   function edit(item, separate = false) {
-    const name = h('input', { required: true, maxlength: 80, value: item.name, 'aria-label': 'Ingredient name' });
+    const name = h('input', { required: true, maxlength: 80, value: item.name, 'aria-label': t('Ingredient name') });
     const category = h('select', {}, ...categories.map((id) => h('option', { value: id, selected: id === item.category }, categoryLabel(id))));
     const notes = h('input', { value: item.notes, maxlength: 500 });
-    const nameField = field('Ingredient name', name);
+    const nameField = field(t('Ingredient name'), name);
     if (separate) {
       nameField.classList.add('rename-field');
       nameField.querySelector('span').prepend(icon('edit', 'rename-pencil'));
     }
     const { close } = openDialog(`edit review-edit-sheet${separate ? ' separate-ingredient-sheet' : ''}`,
-      h('div', { class: 'row' }, h('h3', {}, separate ? 'Not a duplicate' : 'Edit ingredient'), h('button', { type: 'button', class: 'icon push-right', 'aria-label': 'Close ingredient editor', onclick: () => close() }, icon('close'))),
-      separate ? h('p', { class: 'muted' }, 'Give this ingredient its own name. It will be added separately.') : null,
+      h('div', { class: 'row' }, h('h3', {}, separate ? t('Not a duplicate') : t('Edit ingredient')), h('button', { type: 'button', class: 'icon push-right', 'aria-label': t('Close ingredient editor'), onclick: () => close() }, icon('close'))),
+      separate ? h('p', { class: 'muted' }, t('Give this ingredient its own name. It will be added separately.')) : null,
       h('form', { class: 'stack', onsubmit: (event) => {
         event.preventDefault(); const value = name.value.trim();
-        if (!value) { name.setCustomValidity('Enter an ingredient name.'); name.reportValidity(); return; }
+        if (!value) { name.setCustomValidity(t('Enter an ingredient name.')); name.reportValidity(); return; }
         const keyOf = (value) => value.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().replace(/\s+/g, ' ').trim();
         if ((separate || item.separate) && !matched(item) && (ingredients.some((other) => keyOf(other.name) === keyOf(value)) || pending.some((other) => other !== item && selected(other) && !matched(other) && keyOf(other.name) === keyOf(value)))) {
-          name.setCustomValidity('Use a distinct name for this ingredient.'); name.reportValidity(); return;
+          name.setCustomValidity(t('Use a distinct name for this ingredient.')); name.reportValidity(); return;
         }
         Object.assign(item, { name: value, category: category.value, notes: notes.value.trim() });
         if (separate) { clearMatch(item); item.automaticDuplicate = false; item.separate = true; item.selected = true; item.deleted = false; }
         close(); changed(item, separate ? 'separated' : 'edited'); focusAction(item);
         if (separate) nodes.get(item.candidateId)?.row.scrollIntoView({ block: 'nearest', behavior: calm?.matches ? 'instant' : 'smooth' });
-      } }, nameField, field('Category', category), field('Notes', notes), h('button', { type: 'submit', class: 'primary' }, icon('check'), separate ? 'Keep as separate ingredient' : 'Save changes')));
+      } }, nameField, field(t('Category'), category), field(t('Notes'), notes), h('button', { type: 'submit', class: 'primary' }, icon('check'), separate ? t('Keep as separate ingredient') : t('Save changes'))));
     name.addEventListener('input', () => name.setCustomValidity('')); name.focus(); if (separate) name.select();
   }
   render();

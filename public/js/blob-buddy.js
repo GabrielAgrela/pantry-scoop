@@ -1,6 +1,7 @@
 import { _parts } from '../vendor/blobatar/internal.js';
 import * as poses from '../vendor/blobatar/expression.js';
 import { gaze } from '../vendor/blobatar/gaze.js';
+import { t } from './i18n.js';
 
 /**
  * Your blob buddy: an animated blobatar that breathes, blinks and glances around, and wears a mood
@@ -20,16 +21,16 @@ let wakeTimer;
 
 /** What each mood says in the menu, a few options each so it does not repeat itself. */
 const LINES = {
-  idle: ['Hi there!', 'Hungry?', 'What’s cooking?', 'Ready when you are'],
-  happy: ['Yay!', 'Look at that!', 'Nice one!'],
-  sad: ['Oh no…', 'That didn’t work'],
-  love: ['Ooh, a keeper!', 'Saved with love'],
-  thinking: ['Hmm, let me think…', 'Cooking up ideas…'],
-  sleepy: ['zzz… late snack?', 'Yawn… still up?'],
-  surprised: ['Whoa!', 'Eep!'],
-  wink: ['Hehe', '😉'],
-  smug: ['I knew it', 'Chef’s kiss'],
-  shy: ['Oh, hi…', 'Stop it, you'],
+  idle: [t('Hi there!'), t('Hungry?'), t('What’s cooking?'), t('Ready when you are')],
+  happy: [t('Yay!'), t('Look at that!'), t('Nice one!')],
+  sad: [t('Oh no…'), t('That didn’t work')],
+  love: [t('Ooh, a keeper!'), t('Saved with love')],
+  thinking: [t('Hmm, let me think…'), t('Cooking up ideas…')],
+  sleepy: [t('zzz… late snack?'), t('Yawn… still up?')],
+  surprised: [t('Whoa!'), t('Eep!')],
+  wink: [t('Hehe'), '😉'],
+  smug: [t('I knew it'), t('Chef’s kiss')],
+  shy: [t('Oh, hi…'), t('Stop it, you')],
 };
 const POKES = ['happy', 'surprised', 'wink', 'love', 'smug', 'shy'];
 

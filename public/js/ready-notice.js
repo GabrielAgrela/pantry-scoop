@@ -1,5 +1,6 @@
 import { h } from './dom.js';
 import { emoji, icon } from './ui.js';
+import { t } from './i18n.js';
 
 /**
  * Floating "something is ready" notices in the bottom-right corner: a scan to review, fresh
@@ -32,7 +33,7 @@ export function showReady(key, { symbol, title, detail, label = title, onOpen, o
     notice.copy.replaceChildren(h('strong', {}, title), h('span', {}, detail));
   }
   notice.open.setAttribute('aria-label', `${label}: ${detail}`);
-  notice.dismiss.setAttribute('aria-label', `Dismiss: ${label}`);
+  notice.dismiss.setAttribute('aria-label', t('Dismiss: {label}', { label }));
   notice.dismiss.hidden = !dismissible;
   notice.open.onclick = () => { hideReady(key); onOpen?.(); };
   notice.dismiss.onclick = () => { hideReady(key); onDismiss?.(); };
