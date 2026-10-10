@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
-import { AiUnavailableError, ConflictError, NotFoundError, ValidationError } from '../../src/domain/errors.ts';
+import { AiUnavailableError, ConflictError, DailyLimitError, NotFoundError, ValidationError } from '../../src/domain/errors.ts';
 import { createDraft } from '../../src/domain/ingredient.ts';
 import { DEFAULT_PROFILE } from '../../src/domain/kitchen-profile.ts';
 import { ProfileService } from '../../src/application/profile-service.ts';
 import { SqliteProfileRepository } from '../../src/infrastructure/db/sqlite-profile-repository.ts';
+import type { Recipe } from '../../src/domain/recipe.ts';
 import { buildTestServices, sampleRecipe, TINY_JPEG } from '../fakes/fixtures.ts';
 
 let ctx: ReturnType<typeof buildTestServices>;
@@ -229,6 +230,21 @@ describe('RecipeService', () => {
     assert.equal(saved.creativity, 'adventurous');
   });
 
+  it('links a saved recipe ingredient to a pantry item stocked under its translated name', () => {
+    const { recipes, stock } = ctx.services;
+    const text = { title: 'Gelado', summary: '', makes: '', steps: ['Bate tudo.', 'Turbina.'], tips: ['Vodka.'],
+      ingredients: [{ name: 'Leite magro', amount: '350 ml' }, { name: 'Natas', amount: '200 ml' }, { name: 'Avelãs', amount: 'um punhado' }] };
+    recipes.save(sampleRecipe({ ingredients: [
+      { name: 'Skimmed milk', amount: '350 ml', inStock: false },
+      { name: 'Cream', amount: '200 ml', inStock: false },
+      { name: 'Hazelnuts', amount: '1 handful', inStock: false },
+    ], translations: { 'Português (Portugal)': text } }));
+    const { ingredient } = stock.addManual({ name: 'Avelãs' });
+    const [milk, , hazelnuts] = recipes.listSaved()[0]!.recipe.ingredients;
+    assert.deepEqual([milk!.inStock, milk!.pantryId], [false, undefined]);
+    assert.deepEqual([hazelnuts!.name, hazelnuts!.inStock, hazelnuts!.pantryId], ['Hazelnuts', true, ingredient.id]);
+  });
+
   it('saves, lists and deletes recipes', () => {
     const { recipes } = ctx.services;
     const saved = recipes.save(sampleRecipe());
@@ -237,5 +253,85 @@ describe('RecipeService', () => {
     assert.deepEqual(recipes.listSaved(), []);
     assert.throws(() => recipes.removeSaved(saved.id), NotFoundError);
     assert.throws(() => recipes.save({ title: 'half a recipe' }), ValidationError);
+  });
+
+  async function finishedBatch(titles: string[]) {
+    const { recipes, jobs } = ctx.services;
+    ctx.generator.answer = titles.map((title) => sampleRecipe({ title }));
+    const plan = recipes.plan({});
+    const job = jobs.start('recipes', plan.request, async () => ({ recipes: await recipes.generate(plan) }));
+    while (jobs.find(job.id)!.status === 'running') await new Promise((done) => setImmediate(done));
+    return job.id;
+  }
+
+  it('writes new ideas in English and adds a translation in the kitchen language', async () => {
+    ctx.services.stock.addManual({ name: 'Natas' });
+    ctx.services.profile.update({ language: 'Français' });
+    const id = await finishedBatch(['Crêpes']);
+    const [recipe] = (ctx.services.jobs.find(id)!.result as { recipes: Recipe[] }).recipes;
+    assert.equal(recipe!.language, 'English');
+    assert.equal(recipe!.title, 'Crêpes');
+    assert.equal(recipe!.translations!['Français']!.title, 'Crêpes [Français]');
+    assert.equal(ctx.generator.calls[0]!.profile.language, 'Français', 'the prompt says to write in English');
+  });
+
+  it('keeps a new idea untranslated when the translation fails, for the recipes page to retry', async () => {
+    ctx.services.stock.addManual({ name: 'Natas' });
+    ctx.services.profile.update({ language: 'Español' });
+    ctx.generator.translation = new AiUnavailableError('busy');
+    const id = await finishedBatch(['Soup']);
+    assert.equal(ctx.services.jobs.find(id)!.status, 'succeeded');
+    const [recipe] = (ctx.services.jobs.find(id)!.result as { recipes: Recipe[] }).recipes;
+    assert.equal(recipe!.translations, undefined);
+  });
+
+  it('adds translations to saved recipes and idea batches once, never changing the English text', async () => {
+    const { stock, profile, recipes, jobs } = ctx.services;
+    stock.addManual({ name: 'Natas' });
+    const id = await finishedBatch(['Soup', 'Stew', 'Pie', 'Tart']);
+    const saved = recipes.save(sampleRecipe({ title: 'Cake' }));
+    profile.update({ language: 'Português (Portugal)' });
+
+    assert.deepEqual(await recipes.translate([id, id, 999]), { saved: 1, batches: [id], failed: 0 });
+    const cake = recipes.listSaved()[0]!;
+    assert.deepEqual([cake.id, cake.recipe.title, cake.recipe.translations!['Português (Portugal)']!.title], [saved.id, 'Cake', 'Cake [Português (Portugal)]']);
+    const batch = (jobs.find(id)!.result as { recipes: Recipe[] }).recipes;
+    assert.deepEqual(batch.map((recipe) => recipe.title), ['Soup', 'Stew', 'Pie', 'Tart']);
+    assert.deepEqual(batch.map((recipe) => recipe.translations!['Português (Portugal)']!.title), ['Soup', 'Stew', 'Pie', 'Tart'].map((title) => `${title} [Português (Portugal)]`));
+    // Groups of three; the cook's own stock names go along so they stay untouched.
+    assert.deepEqual(ctx.generator.translateCalls.map((call) => call.recipes.length).sort(), [1, 1, 3]);
+    assert.deepEqual(ctx.generator.translateCalls[0]!.pantryNames, ['Natas']);
+
+    const calls = ctx.generator.translateCalls.length;
+    assert.deepEqual(await recipes.translate([id]), { saved: 0, batches: [], failed: 0 });
+    assert.equal(ctx.generator.translateCalls.length, calls);
+
+    // Switching languages adds another translation beside the first; English needs none.
+    profile.update({ language: 'Español' });
+    assert.deepEqual(await recipes.translate([id]), { saved: 1, batches: [id], failed: 0 });
+    assert.deepEqual(Object.keys(recipes.listSaved()[0]!.recipe.translations!), ['Português (Portugal)', 'Español']);
+    profile.update({ language: 'English' });
+    assert.deepEqual(await recipes.translate([id]), { saved: 0, batches: [], failed: 0 });
+  });
+
+  it('leaves recipes alone for a kitchen language written as free text', async () => {
+    ctx.services.recipes.save(sampleRecipe({ title: 'Cake' }));
+    ctx.services.profile.update({ language: 'English steps, Portuguese ingredient names' });
+    assert.deepEqual(await ctx.services.recipes.translate([]), { saved: 0, batches: [], failed: 0 });
+    assert.equal(ctx.generator.translateCalls.length, 0);
+  });
+
+  it('stops translating when the daily AI requests run out, keeping the originals', async () => {
+    const { stock, profile, recipes, jobs } = ctx.services;
+    stock.addManual({ name: 'Natas' });
+    const id = await finishedBatch(['Soup', 'Stew', 'Pie', 'Tart', 'Flan', 'Bread', 'Salad']);
+    recipes.save(sampleRecipe({ title: 'Cake' }));
+    profile.update({ language: 'Español' });
+    ctx.generator.translation = new DailyLimitError('Out of requests.');
+
+    assert.deepEqual(await recipes.translate([id]), { saved: 0, batches: [], failed: 8 });
+    assert.ok(ctx.generator.translateCalls.length <= 3);
+    assert.equal(recipes.listSaved()[0]!.recipe.translations, undefined);
+    assert.equal((jobs.find(id)!.result as { recipes: Recipe[] }).recipes[0]!.translations, undefined);
   });
 });

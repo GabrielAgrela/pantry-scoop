@@ -7,15 +7,17 @@ import { ConnectionsService } from '../../src/application/connections-service.ts
 import { SqliteLinkedAccountRepository } from '../../src/infrastructure/db/sqlite-linked-account-repository.ts';
 import { GOOGLE_ISSUER, type GoogleAuth, type GoogleAuthorizeParams } from '../../src/ports/google-auth.ts';
 import { ProfileService } from '../../src/application/profile-service.ts';
+import type { LanguageCode } from '../../src/domain/language.ts';
 import { RecipeService } from '../../src/application/recipe-service.ts';
 import { ScanService } from '../../src/application/scan-service.ts';
 import { JobService } from '../../src/application/job-service.ts';
 import { InMemorySignInTransactionStore } from '../../src/application/sign-in-transactions.ts';
 import { StockService } from '../../src/application/stock-service.ts';
+import { ShoppingService } from '../../src/application/shopping-service.ts';
 import type { ImageInput } from '../../src/domain/image.ts';
 import type { Ingredient } from '../../src/domain/ingredient.ts';
 import type { KitchenProfile } from '../../src/domain/kitchen-profile.ts';
-import type { Recipe, SuggestionRequest } from '../../src/domain/recipe.ts';
+import type { Recipe, RecipeText, SuggestionRequest } from '../../src/domain/recipe.ts';
 import type { OpenAiIdentity } from '../../src/domain/user.ts';
 import type { AppContainer, AppServices } from '../../src/http/app.ts';
 import { DailyAiLimit } from '../../src/application/daily-ai-limit.ts';
@@ -32,11 +34,13 @@ import { SqliteIngredientRepository } from '../../src/infrastructure/db/sqlite-i
 import { SqliteJobRepository } from '../../src/infrastructure/db/sqlite-job-repository.ts';
 import { SqliteProfileRepository } from '../../src/infrastructure/db/sqlite-profile-repository.ts';
 import { SqliteSavedRecipeRepository } from '../../src/infrastructure/db/sqlite-saved-recipe-repository.ts';
+import { SqliteScoopMemoryRepository } from '../../src/infrastructure/db/sqlite-scoop-memory-repository.ts';
+import { SqliteShoppingRepository } from '../../src/infrastructure/db/sqlite-shopping-repository.ts';
 import { TokenCipher } from '../../src/infrastructure/db/token-cipher.ts';
 import type { DetectedIngredient, IngredientDetector } from '../../src/ports/ingredient-detector.ts';
 import type { ModelCatalog, ModelOption } from '../../src/ports/model-catalog.ts';
 import type { AuthorizeParams, OpenAiAuth, TokenSet } from '../../src/ports/openai-auth.ts';
-import type { RecipeGenerator } from '../../src/ports/recipe-generator.ts';
+import type { FeedbackReflection, FeedbackSteering, RecipeChatMessage, RecipeGenerator } from '../../src/ports/recipe-generator.ts';
 
 export const FIXED_NOW = () => new Date('2026-10-02T10:00:00.000Z');
 
@@ -86,12 +90,36 @@ export class FakeDetector implements IngredientDetector {
 
 export class FakeGenerator implements RecipeGenerator {
   answer: Recipe[] | Error = [sampleRecipe()];
-  calls: { stock: readonly Ingredient[]; profile: KitchenProfile; request: SuggestionRequest; pastTitles: readonly string[] }[] = [];
+  chatAnswer: string | Error = 'Yes! Use the same amount, but expect a slightly lighter texture.';
+  chatCalls: { recipe: Recipe; stock: readonly Ingredient[]; profile: KitchenProfile; question: string; history: readonly RecipeChatMessage[] }[] = [];
+  calls: { stock: readonly Ingredient[]; profile: KitchenProfile; request: SuggestionRequest; pastTitles: readonly string[]; memories: readonly string[] }[] = [];
+  reflection: FeedbackReflection | Error = { reply: 'So glad it worked out!', notes: ['Likes desserts less sweet'] };
+  reflectCalls: { recipe: Recipe; feedback: string; memories: readonly string[]; steering?: FeedbackSteering }[] = [];
+  /** Marks each translated title with the language, unless set to an error. */
+  translation: Error | undefined;
+  translateCalls: { recipes: readonly Recipe[]; language: string; pantryNames: readonly string[] }[] = [];
 
-  async suggest(stock: readonly Ingredient[], profile: KitchenProfile, request: SuggestionRequest, pastTitles: readonly string[] = []): Promise<Recipe[]> {
-    this.calls.push({ stock, profile, request, pastTitles });
+  async suggest(stock: readonly Ingredient[], profile: KitchenProfile, request: SuggestionRequest, pastTitles: readonly string[] = [], memories: readonly string[] = []): Promise<Recipe[]> {
+    this.calls.push({ stock, profile, request, pastTitles, memories });
     if (this.answer instanceof Error) throw this.answer;
     return this.answer;
+  }
+  async reflect(recipe: Recipe, feedback: string, _profile: KitchenProfile, memories: readonly string[], steering?: FeedbackSteering): Promise<FeedbackReflection> {
+    this.reflectCalls.push({ recipe, feedback, memories, steering });
+    if (this.reflection instanceof Error) throw this.reflection;
+    return this.reflection;
+  }
+  async translate(recipes: readonly Recipe[], language: string, pantryNames: readonly string[]): Promise<RecipeText[]> {
+    this.translateCalls.push({ recipes, language, pantryNames });
+    if (this.translation) throw this.translation;
+    return recipes.map(({ title, summary, makes, ingredients, steps, tips }) => ({
+      title: `${title} [${language}]`, summary, makes, ingredients: ingredients.map(({ name, amount }) => ({ name, amount })), steps, tips,
+    }));
+  }
+  async ask(recipe: Recipe, stock: readonly Ingredient[], profile: KitchenProfile, question: string, history: readonly RecipeChatMessage[]): Promise<string> {
+    this.chatCalls.push({ recipe, stock, profile, question, history });
+    if (this.chatAnswer instanceof Error) throw this.chatAnswer;
+    return this.chatAnswer;
   }
 }
 
@@ -237,9 +265,9 @@ export class FakeClassifier implements IngredientClassifier {
 }
 
 /** Feature services for one user, with fake AI. */
-export function servicesFor(db: DatabaseSync, userId: number, detector: FakeDetector, generator: FakeGenerator, classifier = new FakeClassifier()): AppServices {
+export function servicesFor(db: DatabaseSync, userId: number, detector: FakeDetector, generator: FakeGenerator, classifier = new FakeClassifier(), language: LanguageCode = 'en'): AppServices {
   const stock = new StockService(new SqliteIngredientRepository(db, userId, FIXED_NOW));
-  const profile = new ProfileService(new SqliteProfileRepository(db, userId));
+  const profile = new ProfileService(new SqliteProfileRepository(db, userId), language);
   const jobs = new SqliteJobRepository(db, userId, FIXED_NOW);
   return {
     stock,
@@ -247,7 +275,8 @@ export function servicesFor(db: DatabaseSync, userId: number, detector: FakeDete
     profile,
     jobs: new JobService(jobs),
     scan: new ScanService(detector, stock),
-    recipes: new RecipeService(generator, stock, profile, new SqliteSavedRecipeRepository(db, userId, FIXED_NOW), jobs),
+    recipes: new RecipeService(generator, stock, profile, new SqliteSavedRecipeRepository(db, userId, FIXED_NOW), jobs, new SqliteScoopMemoryRepository(db, userId, FIXED_NOW)),
+    shopping: new ShoppingService(new SqliteShoppingRepository(db, userId, FIXED_NOW), stock),
   };
 }
 
@@ -304,7 +333,7 @@ export function buildTestContainer(
     account: new AccountService(repos.users, repos.connections, catalog),
     connections,
     aiLimit: new DailyAiLimit(new SqliteAiUsageRepository(db), 30, now),
-    forUser: (userId) => servicesFor(db, userId, detector, generator, classifier),
+    forUser: (userId, language) => servicesFor(db, userId, detector, generator, classifier, language),
   };
   return { db, repos, linked, openai, google: google!, detector, generator, classifier, catalog, auth, connections, container };
 }

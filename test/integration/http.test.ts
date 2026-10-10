@@ -173,6 +173,7 @@ describe('hardening', () => {
     assert.equal(response.headers['x-content-type-options'], 'nosniff');
     assert.equal(response.headers['x-frame-options'], 'DENY');
     assert.equal(response.headers['referrer-policy'], 'no-referrer');
+    assert.equal(response.headers['permissions-policy'], 'camera=(self), microphone=(self), geolocation=(), payment=()');
     assert.equal(response.headers['cache-control'], 'no-store');
   });
 
@@ -513,6 +514,41 @@ describe('scan API', () => {
 });
 
 describe('recipes API', () => {
+  it('translates saved recipes and the listed idea batches after a language change, once', async () => {
+    const call = api(await signIn('alice'));
+    await call('POST', '/api/ingredients', { name: 'Natas' });
+    ctx.generator.answer = [sampleRecipe({ title: 'Soup' })];
+    const batch = await finished(call, (await call('POST', '/api/recipes/suggestions', { count: 1 })).body.job.id);
+    await call('POST', '/api/recipes/saved', { recipe: sampleRecipe({ title: 'Cake' }) });
+    assert.deepEqual((await call('POST', '/api/recipes/translate', { batches: [batch.id] })).body, { saved: 0, batches: [], failed: 0 });
+
+    await call('PUT', '/api/profile', { language: 'Français' });
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const translate = ctx.generator.translate.bind(ctx.generator);
+    ctx.generator.translate = async (...args) => { await gate; return translate(...args); };
+    const pending = [1, 2].map(() => call('POST', '/api/recipes/translate', { batches: [batch.id] }));
+    for (let i = 0; i < 20; i++) await new Promise((done) => setImmediate(done));
+    release();
+    const [first, second] = await Promise.all(pending);
+    assert.deepEqual(first!.body, { saved: 1, batches: [batch.id], failed: 0 });
+    assert.deepEqual(second!.body, first!.body, 'a second tab joins the pass already running');
+    assert.equal(ctx.generator.translateCalls.length, 2);
+    const cake = (await call('GET', '/api/recipes/saved')).body.recipes[0].recipe;
+    assert.deepEqual([cake.title, cake.translations['Français'].title], ['Cake', 'Cake [Français]']);
+    assert.equal((await call('GET', `/api/jobs/${batch.id}`)).body.job.result.recipes[0].translations['Français'].title, 'Soup [Français]');
+    // Saving a recipe sent back from the screen keeps its translations.
+    const resaved = (await call('POST', '/api/recipes/saved', { recipe: { ...cake, title: 'Cake 2' } })).body.saved.recipe;
+    assert.equal(resaved.translations['Français'].title, 'Cake [Français]');
+    assert.equal((await call('POST', '/api/recipes/saved', { recipe: { ...cake, translations: { Français: { title: 'x' } } } })).status, 400);
+
+    const bob = api(await signIn('bob'));
+    await bob('PUT', '/api/profile', { language: 'Español' });
+    assert.deepEqual((await bob('POST', '/api/recipes/translate', { batches: [batch.id] })).body.batches, []);
+    assert.equal((await call('POST', '/api/recipes/translate', { batches: ['1'] })).status, 400);
+    assert.equal((await call('POST', '/api/recipes/translate', { batches: Array.from({ length: 51 }, (_, i) => i + 1) })).status, 400);
+  });
+
   it('updates saved and generated recipe requirements when pantry stock changes', async () => {
     const call = api(await signIn('alice'));
     const coconut = (await call('POST', '/api/ingredients', { name: 'Cóconut' })).body.ingredient;
@@ -601,6 +637,31 @@ describe('recipes API', () => {
     assert.equal((await api(undefined)('GET', '/api/recipes/history')).status, 401);
   });
 
+  it('offers earlier ideas for the same order that still fit the pantry, without asking the AI', async () => {
+    const call = api(await signIn('alice'));
+    await call('POST', '/api/ingredients', { name: 'Leite magro' });
+    await call('POST', '/api/ingredients', { name: 'Natas' });
+    const pantryOnly = sampleRecipe({ title: 'Pantry pudding', ingredients: [{ name: 'Natas', amount: '1', inStock: true }] });
+    const needsShopping = sampleRecipe({ title: 'Hazelnut swirl' });
+    ctx.generator.answer = [pantryOnly, needsShopping];
+    await finished(call, (await call('POST', '/api/recipes/suggestions', { count: 2, craving: 'Pudding' })).body.job.id);
+    ctx.generator.answer = [{ ...pantryOnly, title: 'Other order' }];
+    await finished(call, (await call('POST', '/api/recipes/suggestions', { count: 1, craving: 'cake' })).body.job.id);
+    let asked = 0;
+    ctx.generator.suggest = async () => { asked++; return []; };
+
+    const titles = async (body: object) => (await call('POST', '/api/recipes/suggestions/earlier', body)).body.recipes.map((r: { title: string }) => r.title);
+    assert.deepEqual(await titles({ count: 1, craving: ' pudding ' }), ['Pantry pudding'], 'a recipe now needing shopping is left out of a pantry-only order');
+    assert.deepEqual(await titles({ count: 1, craving: 'pudding', maxMissing: 1 }), [], 'a different order has no earlier ideas');
+    assert.deepEqual(await titles({ craving: 'cake' }), ['Other order']);
+    assert.equal(asked, 0);
+    const bob = api(await signIn('bob'));
+    await bob('POST', '/api/ingredients', { name: 'Natas' });
+    assert.deepEqual((await bob('POST', '/api/recipes/suggestions/earlier', { craving: 'cake' })).body.recipes, []);
+    assert.equal((await call('POST', '/api/recipes/suggestions/earlier', { count: 9 })).status, 400);
+    assert.equal((await api(undefined)('POST', '/api/recipes/suggestions/earlier', {})).status, 401);
+  });
+
   it('clears finished idea batches but keeps running ones, saved recipes and other accounts', async () => {
     const alice = await signIn('alice');
     const call = api(alice);
@@ -647,6 +708,76 @@ describe('recipes API', () => {
     assert.deepEqual((await call('GET', '/api/recipes/history?search=%25')).body, { batches: [], nextBefore: null });
     assert.equal((await call('GET', `/api/recipes/history?search=${'x'.repeat(201)}`)).status, 400);
     assert.equal((await api(await signIn('bob'))('GET', '/api/recipes/history?search=creme')).body.batches.length, 0);
+  });
+});
+
+describe('starter pantry setup', () => {
+  it('offers selected basics without stocking anything until review, then remembers exclusions', async () => {
+    const call = api(await signIn());
+    const offered = (await call('GET', '/api/ingredients/basics')).body.basics;
+    assert.equal(offered.length, 9);
+    assert.ok(offered.every((item: { selected: boolean }) => item.selected));
+    assert.deepEqual((await call('GET', '/api/ingredients')).body.ingredients, []);
+    const selected = ['Water', 'Salt', 'Black pepper', 'Eggs'];
+    const saved = await call('POST', '/api/ingredients/basics', { selected });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.body.profile.setupStep, 1);
+    assert.equal(saved.body.profile.setupComplete, false);
+    assert.deepEqual(saved.body.profile.pantryBasics, selected);
+    assert.deepEqual(saved.body.ingredients.map((item: { name: string }) => item.name).sort(), [...selected].sort());
+    assert.equal(saved.body.ingredients.find((item: { name: string }) => item.name === 'Eggs').category, 'eggs');
+    await call('PUT', '/api/profile', { setupStep: 0 });
+    const revisited = (await call('GET', '/api/ingredients/basics')).body.basics;
+    assert.deepEqual(revisited.filter((item: { selected: boolean }) => item.selected).map((item: { name: string }) => item.name), selected);
+    await call('POST', '/api/ingredients/basics', { selected });
+    assert.equal((await call('GET', '/api/ingredients')).body.ingredients.length, 4);
+  });
+
+  it('reviews existing stock without duplicating or losing notes and keeps unrelated food', async () => {
+    const call = api(await signIn());
+    const milk = (await call('POST', '/api/ingredients', { name: 'MILK', category: 'dairy', notes: 'Oat milk' })).body.ingredient;
+    await call('PATCH', `/api/ingredients/${milk.id}`, { inStock: false });
+    await call('POST', '/api/ingredients', { name: 'Strawberries', category: 'fruit' });
+    assert.equal((await call('GET', '/api/ingredients/basics')).body.basics.find((item: { name: string }) => item.name === 'Milk').selected, false);
+    await call('POST', '/api/ingredients/basics', { selected: ['Milk'] });
+    let stock = (await call('GET', '/api/ingredients')).body.ingredients;
+    assert.equal(stock.length, 2);
+    assert.equal(stock.find((item: { id: number }) => item.id === milk.id).notes, 'Oat milk');
+    assert.equal(stock.find((item: { id: number }) => item.id === milk.id).inStock, true);
+    await call('POST', '/api/ingredients/basics', { selected: [] });
+    stock = (await call('GET', '/api/ingredients')).body.ingredients;
+    assert.equal(stock.find((item: { id: number }) => item.id === milk.id).inStock, false);
+    assert.equal(stock.find((item: { name: string }) => item.name === 'Strawberries').inStock, true);
+    assert.ok((await call('GET', '/api/ingredients/basics')).body.basics.every((item: { selected: boolean }) => !item.selected));
+  });
+
+  it('rejects invalid selections without changing stock and isolates accounts', async () => {
+    assert.equal((await api(undefined)('POST', '/api/ingredients/basics', { selected: [] })).status, 401);
+    const call = api(await signIn());
+    for (const selected of [null, 'Eggs', ['Water', 'Unknown'], [1]]) {
+      assert.equal((await call('POST', '/api/ingredients/basics', { selected })).status, 400);
+    }
+    assert.deepEqual((await call('GET', '/api/ingredients')).body.ingredients, []);
+    await call('POST', '/api/ingredients/basics', { selected: ['Water'] });
+    const other = api(await signIn('another-kitchen'));
+    assert.deepEqual((await other('GET', '/api/ingredients')).body.ingredients, []);
+    assert.equal((await other('GET', '/api/profile')).body.profile.setupStep, 0);
+    assert.ok((await other('GET', '/api/ingredients/basics')).body.basics.every((item: { selected: boolean }) => item.selected));
+  });
+
+  it('rolls stock back if saving setup progress fails', async () => {
+    const session = await signIn();
+    const failingApp = await buildApp({ ...ctx.container, forUser: userId => {
+      const services = ctx.container.forUser(userId);
+      services.profile.update = () => { throw new Error('Profile save failed'); };
+      return services;
+    } });
+    const failed = await failingApp.inject({ method: 'POST', url: '/api/ingredients/basics',
+      cookies: { ps_session: session }, payload: { selected: ['Eggs', 'Water'] } });
+    assert.equal(failed.statusCode, 500);
+    await failingApp.close();
+    assert.deepEqual((await api(session)('GET', '/api/ingredients')).body.ingredients, []);
+    assert.equal((await api(session)('GET', '/api/profile')).body.profile.setupStep, 0);
   });
 });
 

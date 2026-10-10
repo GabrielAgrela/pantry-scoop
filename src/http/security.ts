@@ -26,7 +26,7 @@ export function registerSecurity(app: FastifyInstance): void {
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('X-Frame-Options', 'DENY');
     reply.header('Referrer-Policy', 'no-referrer');
-    reply.header('Permissions-Policy', 'camera=(self), microphone=(), geolocation=(), payment=()');
+    reply.header('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=(), payment=()');
     reply.header('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
     if (request.protocol === 'https') reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
     if (request.url.startsWith('/api/')) reply.header('Cache-Control', 'no-store');

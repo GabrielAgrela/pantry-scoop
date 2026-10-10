@@ -10,6 +10,7 @@ describe('DEFAULT_PROFILE', () => {
     assert.equal(DEFAULT_PROFILE.language, 'English');
     assert.equal(DEFAULT_PROFILE.preferences, '');
     assert.equal(DEFAULT_PROFILE.setupComplete, false);
+    assert.equal(DEFAULT_PROFILE.dishTypes.find((dish) => dish.name === 'Ice cream')!.details, 'Frozen desserts, including ice cream and sorbet');
   });
 });
 

@@ -171,6 +171,62 @@ export const MIGRATIONS: readonly Migration[] = [
      count   INTEGER NOT NULL,
      PRIMARY KEY (user_id, day)
    );`,
+  // 13 — remove the old default that required a machine even in kitchens without one.
+  // Match the exact shipped text; preserve personally edited dish descriptions.
+  (db) => {
+    const clean = (data: string): string => {
+      const profile = JSON.parse(data) as KitchenProfile;
+      if (!profile.dishTypes?.some((dish) => dish.name === 'Ice cream' && dish.details === 'Frozen dessert made in the ice-cream machine')) return data;
+      return JSON.stringify({ ...profile, dishTypes: profile.dishTypes.map((dish) =>
+        dish.name === 'Ice cream' && dish.details === 'Frozen dessert made in the ice-cream machine'
+          ? { ...dish, details: 'Frozen desserts, including ice cream and sorbet' } : dish) });
+    };
+    const rows = db.prepare('SELECT user_id, data FROM kitchen_profiles').all() as unknown as { user_id: number; data: string }[];
+    const update = db.prepare('UPDATE kitchen_profiles SET data = ? WHERE user_id = ?');
+    for (const row of rows) {
+      const data = clean(row.data);
+      if (data !== row.data) update.run(data, row.user_id);
+    }
+    const old = db.prepare("SELECT value FROM settings WHERE key = 'kitchen_profile'").get() as { value: string } | undefined;
+    if (old) {
+      const data = clean(old.value);
+      if (data !== old.value) db.prepare("UPDATE settings SET value = ? WHERE key = 'kitchen_profile'").run(data);
+    }
+  },
+  // 14 — what Scoop learned from feedback after cooking, fed into later recipe ideas.
+  `CREATE TABLE scoop_memories (
+     id           INTEGER PRIMARY KEY AUTOINCREMENT,
+     user_id      INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+     note         TEXT NOT NULL,
+     recipe_title TEXT NOT NULL DEFAULT '',
+     created_at   TEXT NOT NULL
+   );
+   CREATE INDEX scoop_memories_user ON scoop_memories (user_id, id);`,
+  // 15 — shopping list: items added by hand, and items the cook said they don't need.
+  //      A hidden pantry item comes back once it has been restocked and runs out again.
+  `CREATE TABLE shopping_items (
+     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+     user_id         INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+     name            TEXT NOT NULL,
+     normalized_name TEXT NOT NULL,
+     emoji           TEXT NOT NULL,
+     created_at      TEXT NOT NULL,
+     UNIQUE (user_id, normalized_name)
+   );
+   CREATE TABLE shopping_hidden (
+     id            INTEGER PRIMARY KEY AUTOINCREMENT,
+     user_id       INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+     item_key      TEXT NOT NULL,
+     ingredient_id INTEGER REFERENCES ingredients (id) ON DELETE CASCADE,
+     recipe_ids    TEXT NOT NULL DEFAULT '[]',
+     created_at    TEXT NOT NULL,
+     UNIQUE (user_id, item_key)
+   );
+   CREATE INDEX shopping_hidden_ingredient ON shopping_hidden (ingredient_id);
+   CREATE TRIGGER shopping_hidden_restocked AFTER UPDATE OF in_stock ON ingredients WHEN NEW.in_stock = 1
+   BEGIN
+     DELETE FROM shopping_hidden WHERE ingredient_id = NEW.id;
+   END;`,
 ];
 
 interface LegacyProfile {

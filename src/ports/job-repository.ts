@@ -10,6 +10,8 @@ export interface JobRepository {
   recent(kind: JobKind | undefined, limit: number): Job[];
   /** Completed recipe batches, newest first, with an exclusive cursor. */
   recipeHistory(limit: number, beforeId?: number): Job[];
+  /** Replaces a finished job's result, keeping when it finished (e.g. a translated batch). */
+  rewriteResult(id: number, result: unknown): void;
   /** Deletes finished recipe batches (running ones stay); returns how many went. */
   clearRecipeHistory(): number;
   countRunning(): number;

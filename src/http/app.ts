@@ -12,6 +12,7 @@ import type { JobService } from '../application/job-service.ts';
 import type { IngredientClassificationService } from '../application/ingredient-classification-service.ts';
 import type { ConnectionsService } from '../application/connections-service.ts';
 import type { StockService } from '../application/stock-service.ts';
+import type { ShoppingService } from '../application/shopping-service.ts';
 import { AuthRequiredError, DomainError } from '../domain/errors.ts';
 import { IMAGE_LIMITS } from '../domain/image.ts';
 import { MANAGE_USAGE_URL } from '../infrastructure/openai/responses-client.ts';
@@ -24,7 +25,11 @@ import { jobRoutes } from './routes/jobs.ts';
 import { profileRoutes } from './routes/profile.ts';
 import { recipeRoutes } from './routes/recipes.ts';
 import { scanRoutes } from './routes/scan.ts';
+import { shoppingRoutes } from './routes/shopping.ts';
 import { loggerOptions, registerSecurity } from './security.ts';
+import { speechRoutes } from './routes/speech.ts';
+import { LANGUAGE_HEADER, languageCode, type LanguageCode } from '../domain/language.ts';
+import type { SpeechSynthesizer } from '../ports/speech-synthesizer.ts';
 
 /** Feature services for one signed-in user. */
 export interface AppServices {
@@ -34,12 +39,13 @@ export interface AppServices {
   readonly recipes: RecipeService;
   readonly profile: ProfileService;
   readonly jobs: JobService;
+  readonly shopping: ShoppingService;
 }
 
 export interface AppContainer {
   readonly auth: AuthService;
   readonly account: AccountService;
-  readonly forUser: (userId: number) => AppServices;
+  readonly forUser: (userId: number, language?: LanguageCode) => AppServices;
   /** Configured PUBLIC_URL, if any. */
   readonly publicUrl?: string;
   /** Linked sign-in providers and the choice of intelligence. */
@@ -49,6 +55,7 @@ export interface AppContainer {
 }
 
 export interface AppOptions {
+  readonly speech?: SpeechSynthesizer;
   readonly publicDir?: string;
   readonly logger?: boolean;
   /** Number of reverse-proxy hops whose X-Forwarded-* headers to trust (0 = none). */
@@ -127,7 +134,7 @@ export async function buildApp(container: AppContainer, options: AppOptions = {}
     request.userId = user.id;
   });
 
-  const servicesOf: ServicesOf = (request) => container.forUser(request.userId);
+  const servicesOf: ServicesOf = (request) => container.forUser(request.userId, languageCode(request.headers[LANGUAGE_HEADER]));
 
   const strict = Math.max(5, Math.floor((options.rateLimitPerMinute ?? 300) / 5));
   await app.register(authRoutes(container.auth, strict, container.publicUrl));
@@ -136,6 +143,8 @@ export async function buildApp(container: AppContainer, options: AppOptions = {}
   await app.register(ingredientRoutes(servicesOf), { prefix: '/api/ingredients' });
   await app.register(scanRoutes(servicesOf), { prefix: '/api/scan' });
   await app.register(recipeRoutes(servicesOf), { prefix: '/api/recipes' });
+  await app.register(shoppingRoutes(servicesOf), { prefix: '/api/shopping' });
+  await app.register(speechRoutes(options.speech), { prefix: '/api/speech' });
   await app.register(profileRoutes(servicesOf), { prefix: '/api/profile' });
   await app.register(jobRoutes(servicesOf), { prefix: '/api/jobs' });
 

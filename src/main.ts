@@ -6,6 +6,7 @@ import { createContainer } from './composition.ts';
 import { loadConfig } from './config.ts';
 import { buildApp } from './http/app.ts';
 import { DeepSeekModel } from './infrastructure/ai/deepseek-model.ts';
+import { KokoroSpeech } from './infrastructure/ai/kokoro-speech.ts';
 import { GOOGLE_JWKS_URL, GoogleOAuthClient } from './infrastructure/google/google-oauth-client.ts';
 import { scheduleBackups } from './infrastructure/db/backup.ts';
 import { openDatabase } from './infrastructure/db/database.ts';
@@ -49,6 +50,7 @@ const stopBackups = scheduleBackups(db, join(dirname(config.dbPath), 'backups'),
 );
 
 const app = await buildApp(container, {
+  speech: process.env.OPENROUTER_API_KEY ? new KokoroSpeech(process.env.OPENROUTER_API_KEY) : undefined,
   logger: true,
   trustProxy: config.trustProxy,
   publicDir: fileURLToPath(new URL('../public', import.meta.url)),

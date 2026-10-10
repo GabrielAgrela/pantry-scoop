@@ -4,14 +4,33 @@ import { bodyObject, idParam } from '../params.ts';
 import type { Recipe } from '../../domain/recipe.ts';
 import { ValidationError } from '../../domain/errors.ts';
 import type { Job } from '../../domain/job.ts';
+import type { TranslationOutcome } from '../../application/recipe-service.ts';
 
 const searchText = (text: string) => text.normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase();
 function matchesSearch(recipe: Recipe, query: string): boolean {
   return searchText([recipe.title, recipe.summary, recipe.kind, ...recipe.ingredients.map((item) => item.name)].join(' ')).includes(query);
 }
 
+/** One translation pass per person at a time; a second request waits for the first. */
+const translating = new Map<number, Promise<TranslationOutcome>>();
+
 export function recipeRoutes(servicesOf: ServicesOf): FastifyPluginAsync {
   return async (app) => {
+    /**
+     * Rewrites saved recipes and the listed idea batches in the kitchen's recipe language, after
+     * the language changed. Each recipe is translated once; the stored versions replace the old ones.
+     */
+    app.post('/translate', async (request) => {
+      const { batches = [] } = bodyObject(request.body ?? {}) as { batches?: unknown };
+      if (!Array.isArray(batches) || batches.length > 50 || !batches.every((id) => Number.isSafeInteger(id) && id > 0)) {
+        throw new ValidationError('Invalid idea batches.');
+      }
+      const userId = request.userId;
+      const pass = translating.get(userId) ?? servicesOf(request).recipes.translate(batches as number[]).finally(() => translating.delete(userId));
+      translating.set(userId, pass);
+      return pass;
+    });
+
     /** Starts recipe ideas in the background; poll /api/jobs/:id for the outcome. */
     app.post('/suggestions', async (request, reply) => {
       const { recipes, jobs } = servicesOf(request);
@@ -20,7 +39,36 @@ export function recipeRoutes(servicesOf: ServicesOf): FastifyPluginAsync {
       return reply.status(202).send({ job });
     });
 
+    /** Ideas already made for the same order, checked before asking for new ones; nothing reaches the AI. */
+    app.post('/suggestions/earlier', async (request) => ({ recipes: servicesOf(request).recipes.earlierIdeas(request.body ?? {}) }));
+
     app.get('/saved', async (request) => ({ recipes: servicesOf(request).recipes.listSaved() }));
+
+    app.post('/ask', { bodyLimit: 256 * 1024 }, async (request) => ({ answer: await servicesOf(request).recipes.ask(bodyObject(request.body)) }));
+
+    /** Scoop's reply to feedback and the notes it proposes; nothing is remembered until POST /memories. */
+    app.post('/feedback', { bodyLimit: 256 * 1024 }, async (request) => servicesOf(request).recipes.reflect(bodyObject(request.body)));
+
+    app.get('/memories', async (request) => ({ memories: servicesOf(request).recipes.listMemories() }));
+
+    app.post('/memories', async (request, reply) => {
+      reply.status(201);
+      return { memories: servicesOf(request).recipes.remember(bodyObject(request.body)) };
+    });
+
+    app.patch('/memories/:id', async (request) => ({
+      memory: servicesOf(request).recipes.editMemory(idParam(request.params), bodyObject(request.body)),
+    }));
+
+    app.delete('/memories/:id', async (request, reply) => {
+      servicesOf(request).recipes.forgetMemory(idParam(request.params));
+      return reply.status(204).send();
+    });
+
+    app.delete('/memories', async (request, reply) => {
+      servicesOf(request).recipes.forgetEverything();
+      return reply.status(204).send();
+    });
 
     app.get('/history', async (request) => {
       const { before, search = '' } = request.query as { before?: string; search?: string };

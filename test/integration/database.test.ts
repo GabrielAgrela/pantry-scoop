@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 import { assertRecipe } from '../../src/domain/recipe.ts';
+import { DEFAULT_PROFILE, LEGACY_PROFILE } from '../../src/domain/kitchen-profile.ts';
 import { openDatabase } from '../../src/infrastructure/db/database.ts';
 import { MIGRATIONS } from '../../src/infrastructure/db/migrations.ts';
 import { hostIdentity } from '../../src/infrastructure/db/sqlite-account-repositories.ts';
@@ -25,6 +26,40 @@ function withTempDir(run: (dir: string) => void) {
 const natas = { name: 'Natas', category: 'dairy' as const, notes: '', source: 'manual' as const };
 
 describe('openDatabase', () => {
+  it('cleans only the inherited machine-specific dish default and preserves custom profiles and recipes', () => {
+    withTempDir((dir) => {
+      const path = join(dir, 'before-equipment-fix.db');
+      const old = new DatabaseSync(path);
+      for (const migration of MIGRATIONS.slice(0, 12)) {
+        if (typeof migration === 'string') old.exec(migration);
+        else migration(old);
+      }
+      old.exec('PRAGMA user_version = 12;');
+      const users = accountRepos(old).users;
+      const inherited = users.create(identity('inherited'));
+      const custom = users.create(identity('custom'));
+      const { pantryBasics: _unused, ...defaults } = DEFAULT_PROFILE;
+      const profile = { ...defaults, dishTypes: LEGACY_PROFILE.dishTypes, preferences: 'Keep this', setupComplete: true };
+      new SqliteProfileRepository(old, inherited.id).save(profile);
+      const edited = { ...profile, dishTypes: [{ name: 'Ice cream', details: 'Use my special machine for family recipes' }] };
+      new SqliteProfileRepository(old, custom.id).save(edited);
+      old.prepare("INSERT INTO settings (key, value) VALUES ('kitchen_profile', ?)").run(JSON.stringify(profile));
+      old.prepare('INSERT INTO saved_recipes (data, created_at, user_id) VALUES (?, ?, ?)').run('{"keep":"original"}', 'x', inherited.id);
+      old.close();
+      const migrated = openDatabase(path);
+      const updated = new SqliteProfileRepository(migrated, inherited.id).load()!;
+      assert.deepEqual(updated, { ...profile, dishTypes: DEFAULT_PROFILE.dishTypes });
+      assert.deepEqual(new SqliteProfileRepository(migrated, custom.id).load(), edited);
+      const legacy = migrated.prepare("SELECT value FROM settings WHERE key = 'kitchen_profile'").get() as { value: string };
+      assert.deepEqual(JSON.parse(legacy.value), updated);
+      assert.equal(migrated.prepare('SELECT data FROM saved_recipes').get()!.data, '{"keep":"original"}');
+      migrated.close();
+      const reopened = openDatabase(path);
+      assert.deepEqual(new SqliteProfileRepository(reopened, inherited.id).load(), updated);
+      reopened.close();
+    });
+  });
+
   it('backfills emojis for every existing owner and stock state without changing ingredient data', () => {
     withTempDir((dir) => {
       const path = join(dir, 'before-emojis.db');

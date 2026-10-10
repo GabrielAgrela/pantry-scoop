@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { assertRecipe, createSuggestionRequest, missingIngredients, pastTitlesFor } from '../../src/domain/recipe.ts';
+import { assertRecipe, createSuggestionRequest, missingIngredients, pastTitlesFor, sameOrder } from '../../src/domain/recipe.ts';
 import { DEFAULT_PROFILE } from '../../src/domain/kitchen-profile.ts';
 import { sampleRecipe } from '../fakes/fixtures.ts';
 
@@ -121,6 +121,30 @@ describe('missingIngredients', () => {
       missingIngredients(sampleRecipe()).map((i) => i.name),
       ['Avelãs'],
     );
+  });
+});
+
+describe('sameOrder', () => {
+  const request = (overrides = {}) => ({ ...createSuggestionRequest({}, DEFAULT_PROFILE), ...overrides });
+
+  it('matches the same order regardless of count, case, accents and list order', () => {
+    const now = request({ craving: 'Crème brûlée', count: 1, appliances: ['Oven', 'Blender'], useIngredients: ['Natas'] });
+    assert.ok(sameOrder(now, request({ craving: ' creme  BRULEE ', count: 5, appliances: ['blender', 'Oven'], useIngredients: ['natas'] })));
+  });
+
+  it('treats fields an older batch did not record as their defaults', () => {
+    const { difficulty, creativity, useIngredients, avoidIngredients, ...older } = request();
+    assert.ok(sameOrder(request(), older));
+    assert.ok(!sameOrder(request({ difficulty: 'easy' }), older));
+  });
+
+  it('tells apart anything that shapes the ideas', () => {
+    for (const change of [{ kind: 'Dinner' }, { servings: 7 }, { maxMissing: 2 }, { craving: 'pizza' }, { difficulty: 'hard' }, { creativity: 'adventurous' },
+      { appliances: ['Oven'] }, { avoidAppliances: ['Oven'] }, { useIngredients: ['Natas'] }, { avoidIngredients: ['Natas'] }]) {
+      assert.ok(!sameOrder(request(), request(change)), JSON.stringify(change));
+    }
+    assert.ok(!sameOrder(request(), null));
+    assert.ok(!sameOrder(request(), {}));
   });
 });
 

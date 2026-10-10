@@ -163,6 +163,7 @@ function callbackErrorPage(message: string): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign-in problem · Pantry Scoop</title>
 <script src="/js/theme.js"></script>
+<script type="module" src="/js/translate-page.js"></script>
 <link rel="stylesheet" href="/styles.css">
-</head><body><main class="auth-error"><div class="card stack"><img src="/assets/scoop-jar.svg" alt="" width="96" height="112"><p class="eyebrow">PANTRY SCOOP / LET’S TRY AGAIN</p><h1>Sign-in didn’t finish <span aria-hidden="true">🫶</span></h1><p>${safe}</p><a class="button primary" href="/">Back to Pantry Scoop</a></div></main></body></html>`;
+</head><body><main class="auth-error"><div class="card stack"><img src="/assets/scoop-jar.svg" alt="" width="96" height="112"><p class="eyebrow" data-i18n="PANTRY SCOOP / LET’S TRY AGAIN">PANTRY SCOOP / LET’S TRY AGAIN</p><h1><span data-i18n="Sign-in didn’t finish">Sign-in didn’t finish</span> <span aria-hidden="true">🫶</span></h1><p data-i18n="${safe}">${safe}</p><a class="button primary" href="/" data-i18n="Back to Pantry Scoop">Back to Pantry Scoop</a></div></main></body></html>`;
 }

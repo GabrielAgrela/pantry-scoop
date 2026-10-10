@@ -1,5 +1,6 @@
 import { ValidationError } from './errors.ts';
 import { normalizeName } from './text.ts';
+import { pantryBasicsSelection } from './pantry-basics.ts';
 
 /** A piece of kitchen equipment and whatever about it shapes a recipe (capacity, limits, quirks). */
 export interface Appliance {
@@ -29,6 +30,8 @@ export interface KitchenProfile {
   /** Missing on kitchens saved before guided setup existed. */
   readonly setupComplete?: boolean;
   readonly setupStep?: number;
+  /** Confirmed starter choices; missing means the basics have not been reviewed yet. */
+  readonly pantryBasics?: readonly string[];
 }
 
 export const ICE_CREAM_MACHINE: Appliance = {
@@ -75,13 +78,16 @@ export const DEFAULT_PROFILE: KitchenProfile = {
     { name: 'Hob', details: '', emoji: '🍳' },
     { name: 'Freezer', details: '', emoji: '❄️' },
   ],
-  dishTypes: LEGACY_PROFILE.dishTypes,
+  dishTypes: LEGACY_PROFILE.dishTypes.map((dish) => dish.name === 'Ice cream'
+    ? { ...dish, details: 'Frozen desserts, including ice cream and sorbet' }
+    : { ...dish }),
   servings: 2,
   units: 'Metric (g, ml, °C)',
   language: 'English',
   preferences: '',
   setupComplete: false,
   setupStep: 0,
+  pantryBasics: undefined,
 };
 
 export const PROFILE_LIMITS = { maxAppliances: 20, maxDishTypes: 20, maxNameLength: 80, maxDetailsLength: 500, maxTextLength: 2000, maxServings: 20 } as const;
@@ -158,6 +164,7 @@ export function mergeProfile(base: KitchenProfile, input: unknown): KitchenProfi
     units: pick('units', (v) => text(v, 'units', PROFILE_LIMITS.maxTextLength), base.units),
     language: pick('language', (v) => text(v, 'language', PROFILE_LIMITS.maxTextLength), base.language),
     preferences: pick('preferences', (v) => text(v, 'preferences', PROFILE_LIMITS.maxTextLength), base.preferences),
+    pantryBasics: pick('pantryBasics', pantryBasicsSelection, base.pantryBasics),
     setupComplete: pick('setupComplete', (v) => {
       if (typeof v !== 'boolean') throw new ValidationError('setupComplete must be a boolean.');
       return v;

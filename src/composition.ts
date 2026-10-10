@@ -8,6 +8,7 @@ import { ChatGptCredentials } from './application/chatgpt-credentials.ts';
 import { ProfileService } from './application/profile-service.ts';
 import { RecipeService } from './application/recipe-service.ts';
 import { ScanService } from './application/scan-service.ts';
+import { ShoppingService } from './application/shopping-service.ts';
 import { JobService } from './application/job-service.ts';
 import { DailyAiLimit } from './application/daily-ai-limit.ts';
 import { LimitedModel } from './infrastructure/ai/limited-model.ts';
@@ -36,9 +37,12 @@ import { SqliteIngredientRepository } from './infrastructure/db/sqlite-ingredien
 import { SqliteJobRepository } from './infrastructure/db/sqlite-job-repository.ts';
 import { SqliteProfileRepository } from './infrastructure/db/sqlite-profile-repository.ts';
 import { SqliteSavedRecipeRepository } from './infrastructure/db/sqlite-saved-recipe-repository.ts';
+import { SqliteScoopMemoryRepository } from './infrastructure/db/sqlite-scoop-memory-repository.ts';
+import { SqliteShoppingRepository } from './infrastructure/db/sqlite-shopping-repository.ts';
 import type { TokenCipher } from './infrastructure/db/token-cipher.ts';
 import type { ResponsesClient } from './infrastructure/openai/responses-client.ts';
 import type { OpenAiAuth } from './ports/openai-auth.ts';
+import type { LanguageCode } from './domain/language.ts';
 
 export interface ContainerDeps {
   readonly config: Config;
@@ -95,7 +99,7 @@ export function createContainer({ config, db, cipher, openaiAuth, responses, goo
   });
 
   /** Services are cheap to build, so each request gets a graph scoped to its user. */
-  const forUser = (userId: number): AppServices => {
+  const forUser = (userId: number, language: LanguageCode = 'en'): AppServices => {
     // Their ChatGPT plan or DeepSeek, as they chose (automatic: the plan when it can be used).
     const onDeepSeek = deepseek !== undefined && connectionsService.aiProvider(userId) === 'deepseek';
     const model = new LimitedModel(
@@ -107,7 +111,7 @@ export function createContainer({ config, db, cipher, openaiAuth, responses, goo
       ? { scan: config.deepseek.scanEffort, sort: config.deepseek.sortEffort, recipe: config.deepseek.recipeEffort }
       : { scan: config.chatgpt.scanEffort, sort: config.chatgpt.scanEffort, recipe: config.chatgpt.recipeEffort };
     const stock = new StockService(new SqliteIngredientRepository(db, userId));
-    const profile = new ProfileService(new SqliteProfileRepository(db, userId));
+    const profile = new ProfileService(new SqliteProfileRepository(db, userId), language);
     const jobs = new SqliteJobRepository(db, userId);
     return {
       stock,
@@ -121,7 +125,9 @@ export function createContainer({ config, db, cipher, openaiAuth, responses, goo
         profile,
         new SqliteSavedRecipeRepository(db, userId),
         jobs,
+        new SqliteScoopMemoryRepository(db, userId),
       ),
+      shopping: new ShoppingService(new SqliteShoppingRepository(db, userId), stock),
     };
   };
 

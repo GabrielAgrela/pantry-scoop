@@ -71,6 +71,10 @@ export class SqliteJobRepository implements JobRepository {
     this.finish(id, 'failed', null, JSON.stringify(error));
   }
 
+  rewriteResult(id: number, result: unknown): void {
+    this.db.prepare("UPDATE jobs SET result = ? WHERE id = ? AND user_id = ? AND status = 'succeeded'").run(JSON.stringify(result ?? null), id, this.userId);
+  }
+
   find(id: number): Job | undefined {
     const row = this.db.prepare('SELECT * FROM jobs WHERE id = ? AND user_id = ?').get(id, this.userId);
     return row ? toJob(row as unknown as Row) : undefined;

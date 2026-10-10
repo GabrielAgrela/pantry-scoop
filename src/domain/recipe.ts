@@ -1,5 +1,6 @@
 import { ValidationError } from './errors.ts';
 import { ANY_DISH, type DishType, type KitchenProfile } from './kitchen-profile.ts';
+import { isRecipeLanguage } from './language.ts';
 import { normalizeName } from './text.ts';
 
 /** How demanding the recipes may be. 'any' = no preference. */
@@ -19,6 +20,16 @@ export interface RecipeIngredient {
   readonly pantryId?: number;
 }
 
+/** The words of a recipe a cook reads, in one language; lists line up with the recipe's own. */
+export interface RecipeText {
+  readonly title: string;
+  readonly summary: string;
+  readonly makes: string;
+  readonly ingredients: readonly { readonly name: string; readonly amount: string }[];
+  readonly steps: readonly string[];
+  readonly tips: readonly string[];
+}
+
 export interface Recipe {
   readonly title: string;
   readonly summary: string;
@@ -34,6 +45,10 @@ export interface Recipe {
   readonly ingredients: readonly RecipeIngredient[];
   readonly steps: readonly string[];
   readonly tips: readonly string[];
+  /** The language the text above is written in. The AI writes and reads recipes in English; older recipes have none and are in English too. */
+  readonly language?: string;
+  /** What the cook reads in another language, keyed by recipe language (e.g. "Français"). Prompts only ever see the text above. */
+  readonly translations?: Readonly<Record<string, RecipeText>>;
   /** For the whole recipe, not per serving. Recipes saved before the macros were asked for only carry kcal and sugar. */
   readonly estimate: {
     readonly kcalMin: number;
@@ -177,6 +192,21 @@ export function createSuggestionRequest(input: unknown, profile: KitchenProfile,
   };
 }
 
+/**
+ * Whether the cook needs a translation of this recipe to read it. Only languages the language
+ * switcher sets count, so an older free-text language never triggers one.
+ */
+export function needsTranslation(recipe: Recipe, language: string): boolean {
+  return isRecipeLanguage(language) && normalizeName(recipe.language ?? 'English') !== normalizeName(language)
+    && !Object.keys(recipe.translations ?? {}).some((name) => normalizeName(name) === normalizeName(language));
+}
+
+/** The text that prompts may use: the recipe without its translations. */
+export function promptRecipe(recipe: Recipe): Recipe {
+  const { translations: _translations, ...rest } = recipe;
+  return rest;
+}
+
 /** Recipes the person has already seen: a past batch (with what was asked) or a saved recipe (craving unknown). */
 export interface PastRecipes {
   readonly craving?: string;
@@ -223,9 +253,37 @@ export function pastTitlesFor(request: SuggestionRequest, sources: readonly Past
 }
 
 /**
+ * Did a past batch ask for the same order? Everything that shapes the ideas must match; how many
+ * were asked for does not, since the earlier ones are still ideas for this order either way.
+ * Fields added since an older batch ran count as their defaults.
+ */
+export function sameOrder(request: SuggestionRequest, past: unknown): boolean {
+  if (typeof past !== 'object' || past === null) return false;
+  const old = past as Partial<Record<keyof SuggestionRequest, unknown>>;
+  const text = (value: unknown) => normalizeName(typeof value === 'string' ? value : '');
+  const names = (value: unknown) => [...new Set((Array.isArray(value) ? value : []).map(text))].sort().join('\n');
+  const sameNames = (key: 'appliances' | 'avoidAppliances' | 'useIngredients' | 'avoidIngredients') => names(request[key]) === names(old[key]);
+  return text(old.kind) === text(request.kind) && old.servings === request.servings && (old.maxMissing ?? 0) === request.maxMissing
+    && text(old.craving) === text(request.craving) && (old.difficulty ?? 'any') === request.difficulty && (old.creativity ?? 'any') === request.creativity
+    && sameNames('appliances') && sameNames('avoidAppliances') && sameNames('useIngredients') && sameNames('avoidIngredients');
+}
+
+/**
  * Shape check for recipes coming back from outside (AI output, saved-recipe payloads).
  * Kept deliberately structural: content quality is the generator's job.
  */
+function validTranslations(value: unknown, recipe: Record<string, unknown>): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value) || Object.keys(value).length > 8) return false;
+  const isStr = (v: unknown): v is string => typeof v === 'string';
+  const sameLength = (list: unknown, original: unknown) => Array.isArray(list) && Array.isArray(original) && list.length === original.length;
+  return Object.values(value).every((text: Record<string, unknown> | null) => text !== null && typeof text === 'object'
+    && isStr(text.title) && isStr(text.summary) && isStr(text.makes)
+    && sameLength(text.steps, recipe.steps) && (text.steps as unknown[]).every(isStr)
+    && sameLength(text.tips, recipe.tips) && (text.tips as unknown[]).every(isStr)
+    && sameLength(text.ingredients, recipe.ingredients)
+    && (text.ingredients as unknown[]).every((item) => item !== null && typeof item === 'object' && isStr((item as Record<string, unknown>).name) && isStr((item as Record<string, unknown>).amount)));
+}
+
 export function assertRecipe(value: unknown): Recipe {
   const fail = (why: string): never => {
     throw new ValidationError(`Invalid recipe: ${why}`);
@@ -244,6 +302,8 @@ export function assertRecipe(value: unknown): Recipe {
   if (!isStrList(r.equipment)) fail('equipment');
   if (!isStrList(r.steps)) fail('steps');
   if (!isStrList(r.tips)) fail('tips');
+  if (r.language !== undefined && !isStr(r.language)) fail('language');
+  if (r.translations !== undefined && !validTranslations(r.translations, r)) fail('translations');
   if (
     !Array.isArray(r.ingredients) ||
     !r.ingredients.every((i: unknown) => {

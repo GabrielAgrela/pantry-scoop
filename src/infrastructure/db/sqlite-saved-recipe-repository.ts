@@ -36,6 +36,10 @@ export class SqliteSavedRecipeRepository implements SavedRecipeRepository {
     return toSaved(row as unknown as Row);
   }
 
+  update(id: number, recipe: Recipe): boolean {
+    return Number(this.db.prepare('UPDATE saved_recipes SET data = ? WHERE id = ? AND user_id = ?').run(JSON.stringify(recipe), id, this.userId).changes) > 0;
+  }
+
   delete(id: number): boolean {
     return Number(this.db.prepare('DELETE FROM saved_recipes WHERE id = ? AND user_id = ?').run(id, this.userId).changes) > 0;
   }
