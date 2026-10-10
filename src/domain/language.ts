@@ -14,6 +14,11 @@ const RECIPE_LANGUAGE: Record<LanguageCode, string> = {
   en: 'English', pt: 'Português (Portugal)', es: 'Español', fr: 'Français',
 };
 
+/** The same languages named in English, for prompts. */
+const LANGUAGE_NAMES: Record<LanguageCode, string> = {
+  en: 'English', pt: 'European Portuguese', es: 'Spanish', fr: 'French',
+};
+
 /** Kokoro voices per language. There is no European Portuguese voice, so Portuguese uses Dora (pt-BR). */
 const VOICES: Record<LanguageCode, string> = { en: 'af_heart', pt: 'pf_dora', es: 'ef_dora', fr: 'ff_siwis' };
 
@@ -77,6 +82,16 @@ export function isRecipeLanguage(text: string): boolean {
  * translation; an older free-text language (e.g. "English steps, Portuguese ingredient names") is used as written.
  */
 export const writingLanguage = (profileLanguage: string): string => isRecipeLanguage(profileLanguage) ? 'English' : profileLanguage;
+
+/**
+ * The kitchen's language, named for a prompt: a language the switcher sets by its English name, an
+ * older free-text one (e.g. "English steps, Portuguese ingredient names") as written, English when blank.
+ */
+export function kitchenLanguage(profileLanguage: string): string {
+  const value = profileLanguage.trim();
+  const code = LANGUAGE_CODES.find((code) => RECIPE_LANGUAGE[code].toLocaleLowerCase() === value.toLocaleLowerCase());
+  return code ? LANGUAGE_NAMES[code] : value || 'English';
+}
 
 /** The starting profile, its suggestions written in the interface language. */
 export function defaultProfile(language: LanguageCode): KitchenProfile {

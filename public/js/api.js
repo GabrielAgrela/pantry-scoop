@@ -83,6 +83,7 @@ export const api = {
   clearRecipeHistory: () => request('DELETE', '/api/recipes/history'),
   saveRecipe: (recipe) => request('POST', '/api/recipes/saved', { recipe }),
   deleteSavedRecipe: (id) => request('DELETE', `/api/recipes/saved/${id}`),
+  cookedRecipe: (recipe, ranOut) => request('POST', '/api/recipes/cooked', { recipe, ranOut }),
   recipeFeedback: (recipe, feedback, history = [], proposed = []) => request('POST', '/api/recipes/feedback', { recipe, feedback, history, proposed }),
   listMemories: () => request('GET', '/api/recipes/memories'),
   remember: (notes, recipeTitle) => request('POST', '/api/recipes/memories', { notes, recipeTitle }),

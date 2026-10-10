@@ -58,6 +58,11 @@ export function recipeRoutes(servicesOf: ServicesOf): FastifyPluginAsync {
       const { recipes, ai } = servicesOf(request);
       return ai.act(() => recipes.reflect(bodyObject(request.body)));
     });
+
+    /** "I cooked this": logs the meal and marks what ran out of the pantry. */
+    app.post('/cooked', { bodyLimit: 256 * 1024 }, async (request, reply) => {
+      reply.status(201);
+      return servicesOf(request).recipes.cooked(bodyObject(request.body));
     });
 
     app.get('/memories', async (request) => ({ memories: servicesOf(request).recipes.listMemories() }));

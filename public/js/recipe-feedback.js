@@ -1,21 +1,96 @@
 import { api } from './api.js';
 import { h, MANAGE_USAGE_URL, openDialog } from './dom.js';
 import { emoji, icon } from './ui.js';
-import { readable, t } from './i18n.js';
+import { readable, t, tn } from './i18n.js';
 
 /** How many times the cook may answer Scoop's proposed notes before keeping them (the server allows the same). */
 const STEERING_ROUNDS = 3;
 
 /**
- * Closes the method page: after cooking, the cook tells Scoop how it went. Scoop replies and
- * proposes notes for its memory; only the ones the cook keeps ticked are remembered, and they
- * steer later recipe ideas. `onShowMemory` closes the recipe and opens the memory in My kitchen.
+ * Closes the method page. "I cooked this" asks what ran out, logs the meal, then offers the
+ * feedback chat: the cook tells Scoop how it went, Scoop replies and proposes notes for its
+ * memory; only the ones the cook keeps ticked are remembered, and they steer later recipe ideas.
+ * `pantry` is the recipe sheet's view of the pantry items behind the recipe (see recipePages);
+ * `onShowMemory` closes the recipe and opens the memory in My kitchen.
  */
-export function recipeFeedbackCard(recipe, { onShowMemory }) {
+export function recipeFeedbackCard(recipe, { pantry, onShowMemory }) {
+  let logged = false;
+  const heading = h('strong', {}, t('Cooked it?'));
+  const text = h('p', {}, t('Tick off anything that ran out, then tell Scoop how it went.'));
+  const feedback = () => openFeedback(recipe, onShowMemory);
+  const button = h('button', { type: 'button', class: 'primary', onclick: () => (logged ? feedback() : openCooked(recipe, pantry, { onLogged, onFeedback: feedback })) },
+    emoji('🍳'), t('I cooked this'));
+  // Once logged, the card keeps the way into the chat for later.
+  function onLogged() {
+    logged = true;
+    heading.textContent = t('Cooked today!');
+    text.textContent = t('It’s in your cooking log. Tell Scoop how it went whenever you like.');
+    button.replaceChildren(emoji('💬'), t('Feedback'));
+  }
   return h('aside', { class: 'recipe-feedback-card' },
     h('img', { src: '/assets/scoop-guide.svg', alt: '', width: 48, height: 51 }),
-    h('div', {}, h('strong', {}, t('Cooked it?')), h('p', {}, t('Tell Scoop how it went, and it will remember for next time.'))),
-    h('button', { type: 'button', class: 'primary', onclick: () => openFeedback(recipe, onShowMemory) }, emoji('💬'), t('Feedback')));
+    h('div', {}, heading, text), button);
+}
+
+/**
+ * "Anything run out?": the recipe's pantry items still in stock, all unticked since most meals
+ * finish nothing. Done logs the meal and marks the ticked ones as run out in one go, then offers
+ * the feedback chat.
+ */
+function openCooked(recipe, pantry, { onLogged, onFeedback }) {
+  const checks = pantry.inStock().map((item) => {
+    const check = h('input', { type: 'checkbox', onchange: count });
+    return { item, check, row: h('li', {}, h('label', { class: 'cooked-item' },
+      h('span', { class: 'review-checkbox' }, check, h('span', {}, icon('check'))),
+      emoji(item.emoji || '🫙'), h('span', {}, item.name))) };
+  });
+  const body = h('div', { class: 'cooked-body' }, checks.length
+    ? [h('p', { class: 'cooked-hint' }, t('Tick only what you finished. Everything else stays in your pantry.')), h('ul', { class: 'cooked-list' }, ...checks.map(({ row }) => row))]
+    : h('p', { class: 'cooked-hint' }, t('Nothing from your pantry to tick off this time.')));
+  const error = h('p', { class: 'recipe-chat-error', role: 'alert', hidden: true });
+  const back = h('button', { type: 'button', onclick: () => sheet.close() }, t('Back to recipe'));
+  const done = h('button', { type: 'button', class: 'primary', onclick: log });
+  const heading = h('h4', {}, t('Anything run out?'));
+  const footer = h('div', { class: 'recipe-chat-form' }, error, h('div', { class: 'memory-actions' }, back, done));
+  const sheet = openDialog('recipe-chat cooked-sheet',
+    h('header', { class: 'recipe-chat-header' },
+      h('img', { class: 'recipe-chat-face', src: '/assets/scoop-guide.svg', alt: '', width: 64, height: 68 }),
+      h('div', {}, heading, h('p', {}, readable(recipe).title)),
+      h('button', { type: 'button', class: 'icon', 'aria-label': t('Back to recipe'), onclick: () => sheet.close() }, icon('close'))),
+    body, footer);
+  sheet.dialog.setAttribute('aria-label', t('I cooked {title}', { title: readable(recipe).title }));
+  count();
+  done.focus({ preventScroll: true });
+
+  function count() {
+    const chosen = checks.filter(({ check }) => check.checked).length;
+    done.replaceChildren(icon('check'), !checks.length ? t('Log it') : chosen ? tn(chosen, '{count} item ran out', '{count} items ran out') : t('Nothing ran out'));
+  }
+  async function log() {
+    const finished = checks.filter(({ check }) => check.checked).map(({ item }) => item);
+    const ids = finished.map((item) => item.pantryId);
+    done.disabled = back.disabled = true; error.hidden = true;
+    checks.forEach(({ check }) => { check.disabled = true; });
+    try {
+      await api.cookedRecipe(recipe, ids);
+    } catch (failure) {
+      error.textContent = failure.message; error.hidden = false;
+      done.disabled = back.disabled = false;
+      checks.forEach(({ check }) => { check.disabled = false; });
+      return;
+    }
+    pantry.ranOut(ids);
+    onLogged();
+    heading.textContent = t('Cooked today!');
+    body.replaceChildren(h('div', { class: 'recipe-chat-message' }, h('strong', {}, 'Scoop'),
+      h('p', {}, finished.length
+        ? tn(finished.length, 'Logged for today! {names} is now marked as run out.', 'Logged for today! {names} are now marked as run out.', { names: finished.map((item) => item.name).join(', ') })
+        : t('Logged for today! Enjoy your meal.'))));
+    const later = h('button', { type: 'button', onclick: () => sheet.close() }, t('Not now'));
+    const tell = h('button', { type: 'button', class: 'primary', onclick: () => { sheet.close(); onFeedback(); } }, emoji('💬'), t('Tell Scoop how it went'));
+    footer.replaceChildren(h('div', { class: 'memory-actions' }, later, tell));
+    tell.focus({ preventScroll: true });
+  }
 }
 
 function openFeedback(recipe, onShowMemory) {

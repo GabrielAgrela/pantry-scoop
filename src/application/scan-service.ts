@@ -3,6 +3,7 @@ import { ingredientEmoji } from '../domain/ingredient-emoji.ts';
 import { ValidationError } from '../domain/errors.ts';
 import type { ImageInput } from '../domain/image.ts';
 import type { IngredientDetector } from '../ports/ingredient-detector.ts';
+import type { ProfileService } from './profile-service.ts';
 import type { AddStatus, StockService } from './stock-service.ts';
 
 export interface ScanResult {
@@ -33,17 +34,19 @@ const BUCKET: Record<AddStatus, keyof ScanResult> = {
 export class ScanService {
   private readonly detector: IngredientDetector;
   private readonly stock: StockService;
+  private readonly profiles: ProfileService;
 
-  constructor(detector: IngredientDetector, stock: StockService) {
+  constructor(detector: IngredientDetector, stock: StockService, profiles: ProfileService) {
     this.detector = detector;
     this.stock = stock;
+    this.profiles = profiles;
   }
 
   /** Detection is durable job data, but never changes inventory until the user confirms. */
   async preview(images: readonly ImageInput[]): Promise<ScanPreview> {
     const known = this.stock.list();
     const byName = new Map(known.map((item) => [normalizeName(item.name), item]));
-    const detected = await this.detector.detect(images, known.map((item) => item.name));
+    const detected = await this.detector.detect(images, known.map((item) => item.name), this.profiles.get().language);
     const result: ScanPreview = { reviewRequired: true, added: [], restocked: [], alreadyInStock: [] };
     const seen = new Set<string>();
     for (const candidate of detected) {
@@ -164,7 +167,7 @@ export class ScanService {
   async scan(images: readonly ImageInput[]): Promise<ScanResult> {
     // Run-out items are included so the detector reuses their names and they get restocked.
     const knownNames = this.stock.list().map((ingredient) => ingredient.name);
-    const detected = await this.detector.detect(images, knownNames);
+    const detected = await this.detector.detect(images, knownNames, this.profiles.get().language);
 
     const result: ScanResult = { added: [], restocked: [], alreadyInStock: [] };
     const seen = new Set<string>();

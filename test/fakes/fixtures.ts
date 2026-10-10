@@ -30,6 +30,7 @@ import {
   SqliteUnownedDataClaimer,
   SqliteUserRepository,
 } from '../../src/infrastructure/db/sqlite-account-repositories.ts';
+import { SqliteCookingLogRepository } from '../../src/infrastructure/db/sqlite-cooking-log-repository.ts';
 import { SqliteIngredientRepository } from '../../src/infrastructure/db/sqlite-ingredient-repository.ts';
 import { SqliteJobRepository } from '../../src/infrastructure/db/sqlite-job-repository.ts';
 import { SqliteProfileRepository } from '../../src/infrastructure/db/sqlite-profile-repository.ts';
@@ -79,10 +80,10 @@ export function sampleRecipe(overrides: Partial<Recipe> = {}): Recipe {
 /** Detector that returns a scripted answer and records what it was asked. */
 export class FakeDetector implements IngredientDetector {
   answer: DetectedIngredient[] | Error = [];
-  calls: { images: readonly ImageInput[]; knownNames: readonly string[] }[] = [];
+  calls: { images: readonly ImageInput[]; knownNames: readonly string[]; language: string }[] = [];
 
-  async detect(images: readonly ImageInput[], knownNames: readonly string[]): Promise<DetectedIngredient[]> {
-    this.calls.push({ images, knownNames });
+  async detect(images: readonly ImageInput[], knownNames: readonly string[], language: string): Promise<DetectedIngredient[]> {
+    this.calls.push({ images, knownNames, language });
     if (this.answer instanceof Error) throw this.answer;
     return this.answer;
   }
@@ -276,9 +277,9 @@ export function servicesFor(
     stock,
     classification: new IngredientClassificationService(classifier, stock),
     profile,
-    scan: new ScanService(detector, stock),
-    recipes: new RecipeService(generator, stock, profile, new SqliteSavedRecipeRepository(db, userId, FIXED_NOW), jobs, new SqliteScoopMemoryRepository(db, userId, FIXED_NOW)),
     jobs: new JobService(jobs, ai),
+    scan: new ScanService(detector, stock, profile),
+    recipes: new RecipeService(generator, stock, profile, new SqliteSavedRecipeRepository(db, userId, FIXED_NOW), jobs, new SqliteScoopMemoryRepository(db, userId, FIXED_NOW), new SqliteCookingLogRepository(db, userId, FIXED_NOW)),
     shopping: new ShoppingService(new SqliteShoppingRepository(db, userId, FIXED_NOW), stock),
     ai,
   };

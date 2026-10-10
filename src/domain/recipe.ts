@@ -71,6 +71,13 @@ export interface SavedRecipe {
   readonly createdAt: string;
 }
 
+/** One time the cook made a recipe, kept as the recipe was when they cooked it. */
+export interface CookedMeal {
+  readonly id: number;
+  readonly recipe: Recipe;
+  readonly cookedAt: string;
+}
+
 export interface SuggestionRequest {
   /** 'any', or a dish type name as spelled in the kitchen profile. */
   readonly kind: string;

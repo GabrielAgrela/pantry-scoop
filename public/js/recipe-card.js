@@ -70,6 +70,7 @@ function nutritionBanner(recipe) {
  * `openTips` shows the recipe's tips; the method page offers it when there are any.
  * `setInStock(pantryId, inStock)` marks a pantry item used up or back in stock (resolves truthy on success);
  * ingredients linked to the pantry offer it, since cooking this could use the last of something.
+ * `pantry` lets "I cooked this" list the linked items still in stock and show the ones that ran out.
  */
 export function recipePages(recipe, { title, openTips, setInStock }) {
   const stocked = recipe.ingredients.map((i) => i.inStock);
@@ -155,7 +156,16 @@ export function recipePages(recipe, { title, openTips, setInStock }) {
     h('div', { class: 'recipe-section-title' }, h('h5', {}, emoji('🥄'), t('Method')),
       recipe.tips.length ? h('button', { type: 'button', class: 'tips-button', onclick: openTips }, emoji('💡'), t('Tips {count}', { count: recipe.tips.length })) : ''),
     h('ol', { class: 'recipe-step-list' }, ...recipe.steps.map((step, index) => h('li', {}, h('span', { class: 'step-number', 'aria-hidden': 'true' }, String(index + 1).padStart(2, '0')), h('p', {}, ...instructionText(step))))));
-  return [overview, ingredients, method];
+  const pantry = {
+    /** One entry per pantry item, even when it stands behind several ingredients. */
+    inStock: () => recipe.ingredients.filter((ingredient, index) => ingredient.pantryId !== undefined && stocked[index]
+      && recipe.ingredients.findIndex((other) => other.pantryId === ingredient.pantryId) === index),
+    ranOut: (pantryIds) => {
+      recipe.ingredients.forEach((ingredient, index) => { if (pantryIds.includes(ingredient.pantryId)) { stocked[index] = false; painters[index](); } });
+      paintCounts();
+    },
+  };
+  return { pages: [overview, ingredients, method], pantry };
 }
 
 /** One compact tool pill opens the complete list, including on touch screens. */

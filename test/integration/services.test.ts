@@ -127,6 +127,13 @@ describe('ScanService', () => {
     assert.deepEqual(result.alreadyInStock, []);
   });
 
+  it('tells the detector the kitchen language, for items without a label', async () => {
+    const { profile, scan } = ctx.services;
+    profile.update({ language: 'Español' });
+    await scan.preview([TINY_JPEG]);
+    assert.equal(ctx.detector.calls[0]!.language, 'Español');
+  });
+
   it('leaves stock untouched when detection fails', async () => {
     ctx.detector.answer = new AiUnavailableError('down');
     await assert.rejects(ctx.services.scan.scan([TINY_JPEG]), AiUnavailableError);

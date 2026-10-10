@@ -227,6 +227,15 @@ export const MIGRATIONS: readonly Migration[] = [
    BEGIN
      DELETE FROM shopping_hidden WHERE ingredient_id = NEW.id;
    END;`,
+  // 16 — cooking log: each time the cook says they made a recipe, with the recipe as cooked.
+  `CREATE TABLE cooked_meals (
+     id         INTEGER PRIMARY KEY AUTOINCREMENT,
+     user_id    INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+     title      TEXT NOT NULL,
+     data       TEXT NOT NULL,
+     cooked_at  TEXT NOT NULL
+   );
+   CREATE INDEX cooked_meals_user ON cooked_meals (user_id, id);`,
 ];
 
 interface LegacyProfile {

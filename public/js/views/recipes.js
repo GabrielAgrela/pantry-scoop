@@ -13,6 +13,7 @@ import { kindLabel, recipePages, recipeTips } from '../recipe-card.js';
 import { createRecipeCompanion } from '../recipe-chat.js';
 import { recipeFeedbackCard } from '../recipe-feedback.js';
 import { hideReady, showReady } from '../ready-notice.js';
+import { keepScreenAwake } from '../wake-lock.js';
 import { load, save } from '../store.js';
 import { dishEmoji, emptyState, emoji, field, icon, pantryFriend } from '../ui.js';
 import { LANGUAGES, localeTag, readable, t, tn, translateMessage } from '../i18n.js';
@@ -425,11 +426,11 @@ export function createRecipesView(root) {
     updateSaveButton();
     const ribbons = recipeRibbons(recipe);
     const title = h('div', { class: `recipe-sheet-title${ribbons ? ' has-ribbons' : ''}` }, ribbons, h('div', { class: 'recipe-title-main' }, h('div', { class: 'recipe-title-art', 'aria-hidden': 'true' }, emoji(dishEmoji(`${shown.title} ${recipe.kind}`))), h('div', { class: 'recipe-title-copy' }, h('h3', {}, shown.title))));
-    const sections = recipePages(shown, { title, openTips: () => {
+    const { pages: sections, pantry } = recipePages(shown, { title, openTips: () => {
       const tips = openDialog('recipe-tips', h('h3', {}, t('Scoop’s kitchen tips')), recipeTips(shown), h('button', { class: 'primary', onclick: () => tips.close() }, t('Got it')));
     }, setInStock: (id, inStock) => api.updateIngredient(id, { inStock }) });
-    // The last page ends with feedback for Scoop's memory.
-    sections.at(-1).append(recipeFeedbackCard(recipe, { onShowMemory: () => { close(); location.hash = 'profile'; } }));
+    // The last page ends with "I cooked this": what ran out, then feedback for Scoop's memory.
+    sections.at(-1).append(recipeFeedbackCard(recipe, { pantry, onShowMemory: () => { close(); location.hash = 'profile'; } }));
     // Briefly reveal the next page on every open, even for returning cooks.
     const pages = h('div', { class: 'recipe-pages peek' }, ...sections);
     const stopPeek = () => pages.classList.remove('peek');
@@ -470,6 +471,8 @@ export function createRecipesView(root) {
       h('header', { class: 'recipe-sheet-header' }, h('span', { class: 'recipe-book-label' }, t('A LITTLE KITCHEN INSPIRATION')), h('button', { class: 'icon', 'aria-label': t('Close recipe'), onclick: () => close() }, icon('close'))),
       h('nav', { class: 'recipe-tabs', 'aria-label': t('Recipe pages') }, indicator, ...tabs),
       h('div', { class: 'recipe-sheet-content' }, pages, createRecipeCompanion(recipe)), h('footer', { class: 'recipe-sheet-footer' }, prev, saveButton, next));
+    // The cook may be following the steps with messy hands: the screen stays on until the sheet closes.
+    dialog.addEventListener('close', keepScreenAwake(), { once: true });
     requestAnimationFrame(follow);
     dialog.addEventListener('keydown', (event) => {
       if (event.key === 'ArrowRight') go(page + 1);

@@ -10,11 +10,13 @@ import {
   needsTranslation,
   pastTitlesFor,
   sameOrder,
+  type CookedMeal,
   type PastRecipes,
   type Recipe,
   type SavedRecipe,
   type SuggestionRequest,
 } from '../domain/recipe.ts';
+import type { CookingLogRepository } from '../ports/cooking-log-repository.ts';
 import type { JobRepository } from '../ports/job-repository.ts';
 import { editedMemoryNote, feedbackText, MAX_NOTE_LENGTH, MAX_NOTES_PER_FEEDBACK, MAX_STEERING_ROUNDS, newMemoryNotes, type ScoopMemory } from '../domain/scoop-memory.ts';
 import type { FeedbackReflection, FeedbackSteering, RecipeChatMessage, RecipeGenerator } from '../ports/recipe-generator.ts';
@@ -74,6 +76,7 @@ export class RecipeService {
   private readonly saved: SavedRecipeRepository;
   private readonly history: Pick<JobRepository, 'recipeHistory' | 'find' | 'rewriteResult'>;
   private readonly memories: ScoopMemoryRepository;
+  private readonly cookingLog: CookingLogRepository;
 
   constructor(
     generator: RecipeGenerator,
@@ -82,6 +85,7 @@ export class RecipeService {
     saved: SavedRecipeRepository,
     history: Pick<JobRepository, 'recipeHistory' | 'find' | 'rewriteResult'>,
     memories: ScoopMemoryRepository,
+    cookingLog: CookingLogRepository,
   ) {
     this.generator = generator;
     this.stock = stock;
@@ -89,6 +93,7 @@ export class RecipeService {
     this.saved = saved;
     this.history = history;
     this.memories = memories;
+    this.cookingLog = cookingLog;
   }
 
   /** Validates the request against the current stock and kitchen (synchronous). */
@@ -268,6 +273,22 @@ export class RecipeService {
 
   forgetEverything(): void {
     this.memories.clear();
+  }
+
+  /**
+   * The cook made this recipe: it goes in the cooking log, and the pantry items they say they
+   * finished are marked as run out, all or nothing.
+   */
+  cooked(input: Record<string, unknown>): { meal: CookedMeal; ranOut: Ingredient[] } {
+    const recipe = assertRecipe(input.recipe);
+    const ranOut = input.ranOut ?? [];
+    if (!Array.isArray(ranOut) || !ranOut.every((id) => Number.isSafeInteger(id) && id > 0)) throw new ValidationError('Invalid run-out ingredients.');
+    const linked = new Set(this.withCurrentStock([recipe])[0]!.ingredients.map((ingredient) => ingredient.pantryId));
+    if (!ranOut.every((id) => linked.has(id))) throw new ValidationError('Only this recipe’s pantry ingredients can be marked as run out.');
+    return this.stock.transaction(() => ({
+      ranOut: [...new Set(ranOut as number[])].map((id) => this.stock.update(id, { inStock: false })),
+      meal: this.cookingLog.insert(recipe),
+    }));
   }
 
   listSaved(): SavedRecipe[] {

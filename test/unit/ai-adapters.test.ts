@@ -68,7 +68,7 @@ describe('schemas', () => {
 describe('AiIngredientDetector', () => {
   it('sends the photos, the schema and the known stock names', async () => {
     const { model, requests } = fakeModel({ ingredients: [{ name: 'Natas', category: 'dairy' }] });
-    const result = await new AiIngredientDetector(model, 'low').detect([TINY_JPEG], ['Leite magro']);
+    const result = await new AiIngredientDetector(model, 'low').detect([TINY_JPEG], ['Leite magro'], 'Español');
 
     assert.deepEqual(result, [{ name: 'Natas', category: 'dairy' }]);
     assert.equal(requests[0]!.images?.length, 1);
@@ -76,16 +76,28 @@ describe('AiIngredientDetector', () => {
     assert.equal(requests[0]!.schemaName, 'pantry_ingredients');
     assert.equal(requests[0]!.effort, 'low');
     assert.match(requests[0]!.prompt, /- Leite magro/);
+    assert.match(requests[0]!.prompt, /kitchen's language \(Spanish\)/);
+  });
+
+  it('keeps label names as printed and names unlabelled items in the kitchen language', () => {
+    const prompt = buildDetectionPrompt([], 'Français');
+    assert.match(prompt, /as written on the label, in whatever language the label is in/);
+    assert.match(prompt, /without a readable label \(loose fruit and vegetables[^\n]*in the kitchen's language \(French\)/);
+    assert.doesNotMatch(prompt, /often Portuguese/);
+    assert.match(buildDetectionPrompt([], 'Português (Portugal)'), /\(European Portuguese\)/);
+    // An older free-text language is passed on as written; a blank one falls back to English.
+    assert.match(buildDetectionPrompt([], 'English steps, Portuguese ingredient names'), /\(English steps, Portuguese ingredient names\)/);
+    assert.match(buildDetectionPrompt([], '  '), /kitchen's language \(English\)/);
   });
 
   it('asks for stocked items too, so the app can report them as already present', () => {
-    const prompt = buildDetectionPrompt(['Natas']);
+    const prompt = buildDetectionPrompt(['Natas'], 'English');
     assert.match(prompt, /including the ones that are already in stock/);
     assert.match(prompt, /do not leave these out/);
   });
 
   it('says so when the stock is empty', () => {
-    assert.match(buildDetectionPrompt([]), /\(none yet\)/);
+    assert.match(buildDetectionPrompt([], 'English'), /\(none yet\)/);
   });
 });
 

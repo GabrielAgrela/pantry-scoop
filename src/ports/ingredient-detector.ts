@@ -11,6 +11,7 @@ export interface IngredientDetector {
   /**
    * @param knownNames names already in stock, so the detector can reuse them
    *                   instead of inventing synonyms ("skim milk" vs "leite magro").
+   * @param language   the kitchen's language (from its profile), for items without a label to read.
    */
-  detect(images: readonly ImageInput[], knownNames: readonly string[]): Promise<DetectedIngredient[]>;
+  detect(images: readonly ImageInput[], knownNames: readonly string[], language: string): Promise<DetectedIngredient[]>;
 }

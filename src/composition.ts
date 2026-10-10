@@ -33,6 +33,7 @@ import {
   SqliteUnownedDataClaimer,
   SqliteUserRepository,
 } from './infrastructure/db/sqlite-account-repositories.ts';
+import { SqliteCookingLogRepository } from './infrastructure/db/sqlite-cooking-log-repository.ts';
 import { SqliteIngredientRepository } from './infrastructure/db/sqlite-ingredient-repository.ts';
 import { SqliteJobRepository } from './infrastructure/db/sqlite-job-repository.ts';
 import { SqliteProfileRepository } from './infrastructure/db/sqlite-profile-repository.ts';
@@ -117,8 +118,8 @@ export function createContainer({ config, db, cipher, openaiAuth, responses, goo
       stock,
       classification: new IngredientClassificationService(new AiIngredientClassifier(model, effort.sort), stock),
       profile,
-      scan: new ScanService(new AiIngredientDetector(model, effort.scan), stock),
       jobs: new JobService(jobs, ai, onJobError),
+      scan: new ScanService(new AiIngredientDetector(model, effort.scan), stock, profile),
       recipes: new RecipeService(
         new AiRecipeGenerator(model, effort.recipe),
         stock,
@@ -126,6 +127,7 @@ export function createContainer({ config, db, cipher, openaiAuth, responses, goo
         new SqliteSavedRecipeRepository(db, userId),
         jobs,
         new SqliteScoopMemoryRepository(db, userId),
+        new SqliteCookingLogRepository(db, userId),
       ),
       shopping: new ShoppingService(new SqliteShoppingRepository(db, userId), stock),
       ai,
